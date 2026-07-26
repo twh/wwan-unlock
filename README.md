@@ -14,7 +14,7 @@ This project removes **only** the country gate. Its primary tool, `wwan-orch`,
 reimplements just Lenovo's gated orchestrator and then calls Lenovo's **own,
 unmodified** worker libraries (bundled in `vendor/lenovo/`) to do the actual
 unlock — omitting only the US-SIM check. So the unlock itself is Lenovo's tested
-code; the one thing reimplemented is the unneeded US SIM gate.
+code; the one thing not reimplemented is the unneeded US SIM gate.
 
 ## Supported hardware
 
