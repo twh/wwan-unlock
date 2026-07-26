@@ -136,7 +136,7 @@ Support for the other radios in — **`foxunlock`** — we're not added as I do 
 have access to that hardware. Others that have that hardware can reverse engineer
 those libraries and add them.
 
-## Scope and honesty
+## Scope
 
 - Modules for both verified and unverified hardware are bundled. Unverified
   modules are marked as such, and the installer warns loudly before touching them.
