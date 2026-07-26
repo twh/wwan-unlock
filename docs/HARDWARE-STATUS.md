@@ -59,7 +59,7 @@ ops[5].set_sar_value(info,1,0,0,0)
 ops[2].uninit()
 ```
 
-The `"libmbim2sar.so"` in Lenovo's log string is a red herring — the real `dlopen`
+The `"libmbim2sar.so"` in Lenovo's log string is misleading — the real `dlopen`
 path baked into `setSARConfig_common` is `/opt/fcc_lenovo/lib/libmbimtools.so`
 (verified at `.rodata` 0xdff0), the lib we ship for `cs24` FCC. The `.bin` tables
 ship in `sar_config_files.tar.gz`; the `cs25/` filenames embed the machine type, so a
