@@ -1,5 +1,6 @@
 # configservice_lenovo — Complete Reverse-Engineering Map
 
+This is an end-to-end analysis of the original Lenovo unlock orchestration binary.
 Source of truth: `~/Downloads/lenovo-wwan-unlock/` (Lenovo WWAN unlock package).
 Binary: `configservice_lenovo` — ELF64 PIE, x86-64, **not stripped**, with `.debug_info`.
 BuildID `ec10eb544ff86c44cc7ab716578f039aafa28d4f`.
@@ -9,7 +10,7 @@ below is grounded in the Lenovo binaries.
 
 ---
 
-## 0. TL;DR EM05 verdict
+## 0. EM05 info
 
 * **EM05-CN (USB `2c7c:0310`, `module.0 == 6`)** → routed to `setSARConfig_common`
   (0x8aa0), which `dlopen`s the **bundled** `/opt/fcc_lenovo/lib/libmbimtools.so`
@@ -368,7 +369,7 @@ blob.
 
 ---
 
-## 10. EM05 VERDICT
+## 10. EM05 
 
 **EM05 SAR (both CN and G) CAN be reimplemented gate-free using ONLY the bundled
 Lenovo artifacts** — `libmbimtools.so` + `sar_config_files.tar.gz` (EM05CN `.bin`)
