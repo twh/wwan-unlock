@@ -1,6 +1,6 @@
 # configservice_lenovo — Complete Reverse-Engineering Map
 
-Source of truth: `/home/twh/Downloads/lenovo-wwan-unlock/` (Lenovo WWAN unlock package).
+Source of truth: `~/Downloads/lenovo-wwan-unlock/` (Lenovo WWAN unlock package).
 Binary: `configservice_lenovo` — ELF64 PIE, x86-64, **not stripped**, with `.debug_info`.
 BuildID `ec10eb544ff86c44cc7ab716578f039aafa28d4f`.
 All addresses are file/virtual addresses from this exact binary. The old
