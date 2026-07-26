@@ -49,7 +49,7 @@ Additionally, per `ThirdPartyNotices.txt`, the **Fibocom** components are
 **BSD-3-Clause** — permissive, so those specifically could even be modified/
 redistributed. The Lenovo-authored wrapper is the restrictive part.
 
-### Decision
+### Configuration
 
 SAR is applied gate-free through `wwan-orch --sar`, which transcribes
 configservice_lenovo's per-family `checkSARConfig_*` dispatch minus the US-SIM gate
@@ -72,7 +72,7 @@ Quectel has no wrapper — the logic lives *inside `configservice_lenovo` itself
 `setSARConfig_common` (~11 KB, 22 live call sites from `main`). `wwan-orch`'s
 `sar_quectel()` transcribes that orchestrator gate-free.
 
-The `libmbim2sar.so` "requirement" was a **red herring**: `setSARConfig_common` logs
+The `libmbim2sar.so` is not actually required: `setSARConfig_common` logs
 `"Open libmbim2sar.so failed!"` but the string it actually passes to `dlopen` is
 `/opt/fcc_lenovo/lib/libmbimtools.so` (verified at `.rodata` 0xdff0) — the lib we
 already bundle for `cs24` FCC, which exports the SAR worker set as the `mbim_sar_ops`
@@ -109,5 +109,5 @@ that lib's function is **fully duplicated in the bundled `libmbimtools.so`** —
 `mbim_set_dprconfig` parses the embedded `DPRConfig.xml` and issues the same
 `at+qcfg="sarcfg"` commands as the external `sar_ops[+0x70]`. Both converge on
 `set_sar_value`'s EM05 branch. `DPRConfig.xml` is extracted at install from Lenovo's
-own unmodified `configservice_lenovo`. Only `fxn` SAR has been run on hardware by the
-maintainer; the rest (incl. EM05) are `unverified`.
+own unmodified `configservice_lenovo`. Only `fxn` SAR has been run on hardware by twh
+at waynehendricks dot com; the rest (incl. EM05) are `unverified`.
