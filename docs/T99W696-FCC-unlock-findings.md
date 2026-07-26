@@ -4,7 +4,7 @@ Target: Foxconn T99W696 (PCI `17cb:0308`), e.g. Lenovo ThinkPad X1 Carbon Gen 14
 Source of truth: Lenovo `lenovo-wwan-unlock` (latest), binaries `DPR_Fcc_unlock_service`
 and `libfiisdk.so.2.2.2` (both non-stripped, with symbols).
 
-## Why raw qmicli failed
+## Why raw qmicli doesn't work
 `qmicli --fox-set-fcc-authentication` returns `MalformedMessage` because the unlock is
 sent as **QMI tunneled over MBIM** on `/dev/wwan0mbim0`, not as a raw QMI message on the
 QMI port. The service/message identifiers also matter (below).
