@@ -5,7 +5,7 @@ Lenovo cannot release software to unlock WWAN modules in the US for Linux becaus
 the FCC requires onerous red tape to recertify them, even though they are already
 certified to run on Windows. This is unacceptable, so we will do it ourselves.
 
-Some ThinkPad WWAN cards ship **FCC-locked**: the radio stays powered down until the
+When a WWAN radio is FCC locked the radio stays powered down until the
 host sends a vendor-specific unlock message after every modem power-on. Lenovo
 distributes closed binaries that do this, but they gate the unlock on the SIM's
 country and their license forbids modifying them.
@@ -14,12 +14,7 @@ This project removes **only** the country gate. Its primary tool, `wwan-orch`,
 reimplements just Lenovo's gated orchestrator and then calls Lenovo's **own,
 unmodified** worker libraries (bundled in `vendor/lenovo/`) to do the actual
 unlock — omitting only the US-SIM check. So the unlock itself is Lenovo's tested
-code; the one thing reimplemented is the ~unneeded gate.
-
-A separate, optional tool — **`foxunlock`** — is a fully clean-room unlock for the
-Foxconn T99W696 that uses **no Lenovo code at runtime** (it builds and sends the
-QMI-over-MBIM message itself). It is not part of the installer; build it by hand
-with `make foxunlock`.
+code; the one thing reimplemented is the unneeded US SIM gate.
 
 ## Supported hardware
 
@@ -118,16 +113,9 @@ Skip it with `--no-sar` (unlock only); re-apply it alone with `--sar-only`.
 **Primary path — `wwan-orch` (gateless orchestrator).** Lenovo's unlock/SAR logic
 lives in libraries (`libfiisdk` etc.); only their orchestrator *binaries* hold the
 US-SIM country gate. `wwan-orch` reimplements just that orchestrator, `dlopen()`s
-Lenovo's own unmodified libraries, and calls the same functions **without** the gate:
+Lenovo's own unmodified libraries, and calls the same functions without the gate.
 
-```
-ModuleConnect("/dev/wwan0mbim0")
-GetCountry()        <-- the US-SIM gate; wwan-orch does NOT call this
-Fox_Attempt()       <-- Lenovo's real, tested unlock
-ModuleDisconnect()
-```
-
-So the only thing unimplemented is the ~unneeded gate; the actual unlock and SAR
+So the only thing unimplemented is the unneeded gate; the actual unlock and SAR
 (`Set_RF_Files`) stay Lenovo's tested code. The libraries are bundled unmodified
 under their license (`vendor/lenovo/`, see its `NOTICE.md`).
 
@@ -143,6 +131,10 @@ sudo ./foxunlock -d /dev/wwan0mbim0
 ```
 
 Full derivation of both: [docs/T99W696-FCC-unlock-findings.md](docs/T99W696-FCC-unlock-findings.md).
+
+Support for the other radios in — **`foxunlock`** — we're not added as I do not
+have access to that hardware. Others that have that hardware can reverse engineer
+those libraries and add them.
 
 ## Scope and honesty
 
