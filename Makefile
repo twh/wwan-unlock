@@ -15,12 +15,18 @@ all: wwan-orch
 wwan-orch: src/wwan-orch.c
 	$(CC) -O2 -Wall -Wextra -o $@ $< -ldl
 
+# RW101 33f8:0301 exposes its FCC AT commands on a ttyUSB port, while Lenovo's
+# unmodified worker library attempts to use its MBIM AT service.  The verified
+# module preloads this transport shim only for that device.
+rw101-serial.so: src/rw101-serial.c
+	$(CC) -O2 -Wall -Wextra -fPIC -shared -o $@ $<
+
 # standalone alternative (built on demand: `make foxunlock`)
 foxunlock: src/foxunlock.c
 	$(CC) -O2 -Wall $(shell pkg-config --cflags glib-2.0 gio-2.0 mbim-glib) \
 	    -o $@ $< $(shell pkg-config --libs glib-2.0 gio-2.0 mbim-glib)
 
 clean:
-	rm -f wwan-orch foxunlock
+	rm -f wwan-orch foxunlock rw101-serial.so
 
 .PHONY: all clean

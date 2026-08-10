@@ -22,8 +22,35 @@ Bundled modules and their family:
 |---|---|---|---|
 | `17cb:0308` | Foxconn T99W696 | `fxn` | **verified on hardware** (X1 Carbon Gen 14) |
 | `1eac:100d` | Quectel EM160R-GL | `cs24` | transcribed, unverified |
-| `33f8:01a4/01a8/01a9/0301/0302` | Rolling RW101R-GL | `rw101` | transcribed, unverified |
+| `33f8:0301` | Rolling RW101R-GL | `rw101` | **FCC verified on hardware** (X1 Carbon Gen 14) |
+| `33f8:01a4/01a8/01a9/0302` | Rolling RW101R-GL | `rw101` | transcribed, unverified |
 | `8086:7560` | Fibocom L860R+ | `l860` | transcribed, unverified |
+
+## RW101R-GL `33f8:0301` verification
+
+The FCC unlock was verified on 2026-08-10 on a ThinkPad X1 Carbon Gen 14
+(`21V7CTO1WW`) with an RW101R-GL running firmware `19512.0000.00.11.03.01` and a
+US SIM. The modem exposes `/dev/cdc-wdm0` for MBIM and `/dev/ttyUSB0` for AT.
+
+On this firmware, the Fibocom MBIM AT service returns `ERROR` for
+`AT+GTFCCLOCKGEN`, while the serial AT port returns a valid challenge. The
+`33f8:0301` dispatcher therefore loads `rw101-serial.so` with `LD_PRELOAD`. The
+shim overrides the worker library's preemptible `get_mbim_port` and
+`send_at_of_mm` transport functions, but leaves its challenge calculation,
+unlock sequence, and bundled binary unchanged. A verified run ended with:
+
+```
+invoked: /dev/cdc-wdm0 via /dev/ttyUSB0 (family rw101)
+FCC unlock: SUCCESS
+result rc=0
+```
+
+The complete vendor retry sequence took about 12 seconds. ModemManager 1.24.2
+has a hard-coded five-second FCC dispatcher timeout, so this verification used a
+30-second timeout. Systems retaining the five-second default will kill the
+dispatcher before it can report success. This is an FCC-unlock verification
+only: RW101 SAR/device-pack provisioning was not exercised and the verified
+module deliberately does not enable it.
 
 ## SAR
 
@@ -126,9 +153,9 @@ disassembly review:
 
 - **"Transcribed"** = calls Lenovo's *tested* library exactly as their orchestrator
   does, so correctness follows from the disassembly, not a reimplemented algorithm.
-  Only `fxn` has been run on real hardware by the maintainer; the installer warns
-  before installing an unverified module. A failed FCC unlock is not destructive —
-  it leaves the radio disabled, recoverable by `--uninstall`.
+  The `fxn` family and RW101 `33f8:0301` FCC path have been run on real hardware;
+  the installer warns before installing an unverified module. A failed FCC unlock
+  is not destructive — it leaves the radio disabled, recoverable by `--uninstall`.
 - **EM05 (`mbim2sar_em05.so`)**: for **FCC**, `DPR_Fcc_unlock_service`'s
   `setFccUnlock_em05` (which loads `/usr/lib/mbim2sar_em05.so`) is **dead code —
   zero call sites**; `main` dispatches every Quectel modem, EM05 included, through

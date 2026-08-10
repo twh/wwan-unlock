@@ -32,9 +32,9 @@
  *           (EM05-CN + EM05-G; the "mbim2sar_em05.so" the stock em05 path dlopens is
  *            functionally duplicated in the bundled libmbimtools.so — see sar_em05())
  *
- * Only fxn is hardware-verified by twh at waynehendricks dot com; the others are faithful
- * transcriptions calling Lenovo's own tested libs (so correctness follows from the
- * disassembly, not from a reimplemented algorithm). [] marks the omitted gate.
+ * The fxn path and RW101 33f8:0301 FCC path are hardware-verified; the others are
+ * faithful transcriptions calling Lenovo's own tested libs (so correctness follows
+ * from the disassembly, not from a reimplemented algorithm). [] marks the omitted gate.
  *
  * Build:  cc -O2 -Wall -o wwan-orch src/wwan-orch.c -ldl
  * Run:    sudo ./wwan-orch --family fxn
