@@ -220,6 +220,13 @@ EOF
         install -m0755 "$SRC/wwan-orch" "$LIBDIR/wwan-orch"
         install -m0755 "$SRC/tools/wwan-sar-boot.sh" "$LIBDIR/wwan-sar-boot.sh"
         info "installed $LIBDIR/wwan-orch"
+        if [ "$MODULE_ORCH_FAMILY" = "rw101" ]; then
+            info "building RW101 serial transport ..."
+            ( cd "$SRC" && make -s rw101-serial.so ) || \
+                die "build failed for RW101 serial transport"
+            install -m0755 "$SRC/rw101-serial.so" "$LIBDIR/rw101-serial.so"
+            info "installed $LIBDIR/rw101-serial.so"
+        fi
         install_lenovo_runtime
     fi
 

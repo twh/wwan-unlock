@@ -31,12 +31,13 @@ and falls back to this implementation otherwise.
 | Quectel EM05-CN | `2c7c:0310` | module (`em05`) — unverified |
 | Quectel EM05-G | `2c7c:030a` | module (`em05`) — unverified |
 | Fibocom L860R+ | `8086:7560` | module — unverified (reuses upstream Intel script) |
-| Rolling RW101R-GL | `33f8:*` | bundled module (`rw101`) — unverified |
+| Rolling RW101R-GL | `33f8:0301` | bundled module (`rw101`, serial AT transport) — verified |
+| Rolling RW101R-GL | `33f8:01a4/01a8/01a9/0302` | bundled module (`rw101`) — unverified |
 
 Full detail and the RW101 situation: [docs/HARDWARE-STATUS.md](docs/HARDWARE-STATUS.md).
-Only `17cb:0308` has been run on real hardware by twh at waynehendricks dot com; the others are
-marked `unverified` and the installer warns before using them. Adding or finishing a
-module is exactly what [docs/ADDING-HARDWARE.md](docs/ADDING-HARDWARE.md) is for.
+`17cb:0308` and `33f8:0301` have been run on real hardware; the others are marked
+`unverified` and the installer warns before using them. Adding or finishing a module
+is exactly what [docs/ADDING-HARDWARE.md](docs/ADDING-HARDWARE.md) is for.
 
 ## Requirements
 
@@ -114,6 +115,12 @@ Skip it with `--no-sar` (unlock only); re-apply it alone with `--sar-only`.
 lives in libraries (`libfiisdk` etc.); only their orchestrator *binaries* hold the
 US-SIM country gate. `wwan-orch` reimplements just that orchestrator, `dlopen()`s
 Lenovo's own unmodified libraries, and calls the same functions without the gate.
+
+The verified RW101R-GL `33f8:0301` firmware exposes the modem as MBIM but accepts
+its FCC challenge commands only on its `ttyUSB` AT port. Its dispatcher preloads a
+small serial transport shim, leaving Lenovo's challenge/response worker library
+unmodified. See [docs/HARDWARE-STATUS.md](docs/HARDWARE-STATUS.md) for the tested
+firmware and ModemManager timeout requirement.
 
 So the only thing unimplemented is the unneeded gate; the actual unlock and SAR
 (`Set_RF_Files`) stay Lenovo's tested code. The libraries are bundled unmodified
