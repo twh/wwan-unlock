@@ -31,6 +31,7 @@ Usually **no**. Stock tooling already exposes most vendor unlock paths:
 | Qualcomm DMS FCC auth | `qmicli --dms-set-fcc-authentication` |
 | Foxconn DMS (v1/v2) | `qmicli --dms-foxconn-set-fcc-authentication{,-v2}` |
 | Foxconn FOX service `0xE3` | `qmicli --fox-set-fcc-authentication` |
+| Foxconn FOXAP service `0xE4` | `qmicli --foxap-set-fcc-authentication` (libqmi 1.40+) |
 | Intel mutual authentication | `mbimcli --help-intel-mutual-authentication` |
 | AT over MBIM | `mbimcli --help-intel-at-tunnel` |
 
