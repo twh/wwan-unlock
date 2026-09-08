@@ -23,7 +23,13 @@ for P in "$@"; do
   fi
 done
 [ -n "$MBIM" ] || { log "no MBIM port"; exit 2; }
-[ -n "$AT" ] || { log "no AT port"; exit 2; }
+[ -n "$AT" ] || {
+  log "no AT port: no ttyUSB among the ports ModemManager passed"
+  log "  the option driver may not be bound to 33f8:0301, which kernels before"
+  log "  6.12.61 / 6.6.119 / 5.15.197 do not know. Install the bundled udev rule"
+  log "  (99-rw101r-serial.rules) or upgrade the kernel; see docs/HARDWARE-STATUS.md"
+  exit 2
+}
 [ -x "$LIB/wwan-orch" ] || { log "wwan-orch not installed"; exit 2; }
 [ -r "$SHIM" ] || { log "RW101 serial transport not installed"; exit 2; }
 

@@ -32,6 +32,21 @@ The FCC unlock was verified on 2026-08-10 on a ThinkPad X1 Carbon Gen 14
 (`21V7CTO1WW`) with an RW101R-GL running firmware `19512.0000.00.11.03.01` and a
 US SIM. The modem exposes `/dev/cdc-wdm0` for MBIM and `/dev/ttyUSB0` for AT.
 
+**The AT port needs a kernel that knows `33f8:0301`.** The `option` usb-serial
+driver only claims this id from commit `523bf0a59e67` ("USB: serial: option: add
+support for the Rolling RW101R-GL modules", 2025-11-10), backported to **6.12.61**,
+**6.6.119** and **5.15.197**. On anything older no `/dev/ttyUSB*` appears, the modem
+is MBIM-only, and the dispatcher exits `2` with "no AT port" — reported on Rocky
+Linux 10.2, whose 6.12.x kernel predates the backport, on a ThinkPad T14 AMD Gen 7
+with firmware `19512.0000.00.11.03.01_VZ E37`.
+
+The fix is either a kernel at or past those versions, or the bundled
+[`99-rw101r-serial.rules`](../modules/33f8:0301/99-rw101r-serial.rules), which
+`modprobe`s `option` and registers the id via `new_id`. `install.sh` checks for a
+bound `ttyUSB` and installs the rule only when one is missing; `--uninstall`
+removes it. Loading `usbserial` or `usb_wwan` explicitly is unnecessary — `option`
+depends on both and `modprobe` pulls them in.
+
 On this firmware, the Fibocom MBIM AT service returns `ERROR` for
 `AT+GTFCCLOCKGEN`, while the serial AT port returns a valid challenge. The
 `33f8:0301` dispatcher therefore loads `rw101-serial.so` with `LD_PRELOAD`. The

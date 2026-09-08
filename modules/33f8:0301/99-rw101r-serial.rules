@@ -1,0 +1,14 @@
+# Bind the option usb-serial driver to the Rolling RW101R-GL (33f8:0301).
+#
+# Only needed on kernels that predate 523bf0a59e67 ("USB: serial: option: add
+# support for the Rolling RW101R-GL modules"), i.e. before 6.12.61, 6.6.119 or
+# 5.15.197. Without it the option driver never claims the device, no /dev/ttyUSB*
+# appears, and the FCC unlock dispatcher exits with "no AT port" — the modem's
+# challenge/response only answers on the serial AT port on this firmware.
+#
+# Harmless on newer kernels: the driver already matches 33f8:0301 by modalias, and
+# writing an id it already knows is a no-op. The modprobe is folded in because
+# /sys/bus/usb-serial/drivers/option1/ does not exist until option is loaded, so a
+# rule that only writes new_id races the module load at boot.
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="33f8", ATTR{idProduct}=="0301", \
+  RUN+="/bin/sh -c '/sbin/modprobe option; echo 33f8 0301 > /sys/bus/usb-serial/drivers/option1/new_id'"

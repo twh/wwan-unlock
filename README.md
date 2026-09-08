@@ -119,8 +119,10 @@ Lenovo's own unmodified libraries, and calls the same functions without the gate
 The verified RW101R-GL `33f8:0301` firmware exposes the modem as MBIM but accepts
 its FCC challenge commands only on its `ttyUSB` AT port. Its dispatcher preloads a
 small serial transport shim, leaving Lenovo's challenge/response worker library
-unmodified. See [docs/HARDWARE-STATUS.md](docs/HARDWARE-STATUS.md) for the tested
-firmware and ModemManager timeout requirement.
+unmodified. That AT port needs a kernel carrying `33f8:0301` in the `option` driver
+(6.12.61 / 6.6.119 / 5.15.197 or later); on older kernels the installer adds a udev
+rule to bind it. See [docs/HARDWARE-STATUS.md](docs/HARDWARE-STATUS.md) for the
+tested firmware, the kernel requirement and the ModemManager timeout requirement.
 
 So the only thing unimplemented is the unneeded gate; the actual unlock and SAR
 (`Set_RF_Files`) stay Lenovo's tested code. The libraries are bundled unmodified

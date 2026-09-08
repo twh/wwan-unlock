@@ -22,6 +22,7 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 MODDIR="$SRC/modules"
 LIBDIR="/usr/local/lib/wwan-unlock"
 FCCDIR="/etc/ModemManager/fcc-unlock.d"
+UDEVRULE="/etc/udev/rules.d/99-rw101r-serial.rules"
 
 die()  { echo "error: $*" >&2; exit 1; }
 info() { echo "$*"; }
@@ -161,6 +162,36 @@ run_sar() {
     info "  enabled wwan-sar.service (re-applies SAR each boot)"
 }
 
+# The rw101 unlock needs the modem's serial AT port. The option driver only
+# claims 33f8:0301 on kernels carrying 523bf0a59e67 (6.12.61 / 6.6.119 /
+# 5.15.197 and later); on anything older no /dev/ttyUSB* appears and the
+# dispatcher cannot run. Install the bundled udev rule when that is the case.
+install_rw101_serial_rule() {
+    _mdir="$1"
+    _rule="$_mdir/99-rw101r-serial.rules"
+    [ -f "$_rule" ] || return 0
+
+    if ls /sys/bus/usb-serial/devices/ttyUSB* >/dev/null 2>&1; then
+        info "serial AT port already present; udev rule not needed"
+        return 0
+    fi
+
+    info "no ttyUSB bound: this kernel does not know 33f8:0301 (added in"
+    info "  6.12.61 / 6.6.119 / 5.15.197). Installing $UDEVRULE ..."
+    install -m0644 "$_rule" "$UDEVRULE"
+    udevadm control --reload >/dev/null 2>&1 || true
+    udevadm trigger --subsystem-match=usb >/dev/null 2>&1 || true
+    modprobe option >/dev/null 2>&1 || true
+    if [ -d /sys/bus/usb-serial/drivers/option1 ]; then
+        echo 33f8 0301 > /sys/bus/usb-serial/drivers/option1/new_id 2>/dev/null || true
+    fi
+    if ls /sys/bus/usb-serial/devices/ttyUSB* >/dev/null 2>&1; then
+        info "  serial AT port now bound"
+    else
+        info "  still no ttyUSB — replug the card or reboot, then re-run"
+    fi
+}
+
 remove_lenovo_runtime() {
     if [ -f /etc/systemd/system/wwan-sar.service ]; then
         systemctl disable wwan-sar.service >/dev/null 2>&1 || true
@@ -169,6 +200,11 @@ remove_lenovo_runtime() {
         info "removed wwan-sar.service"
     fi
     [ -d "$FCC_LENOVO" ] && { rm -rf "$FCC_LENOVO"; info "removed $FCC_LENOVO"; }
+    if [ -f "$UDEVRULE" ]; then
+        rm -f "$UDEVRULE"
+        udevadm control --reload >/dev/null 2>&1 || true
+        info "removed $UDEVRULE"
+    fi
 }
 
 # ---- actions ---------------------------------------------------------------
@@ -226,6 +262,7 @@ EOF
                 die "build failed for RW101 serial transport"
             install -m0755 "$SRC/rw101-serial.so" "$LIBDIR/rw101-serial.so"
             info "installed $LIBDIR/rw101-serial.so"
+            install_rw101_serial_rule "$_dir"
         fi
         install_lenovo_runtime
     fi
