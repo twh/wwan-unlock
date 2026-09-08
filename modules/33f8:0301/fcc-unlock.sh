@@ -13,7 +13,8 @@
 #   at+gtfcclockgen           challenge, at_send_command_singleline
 #   at+gtfcclockver=<n>       response, must reply 1
 #   at+gtfcclockmodeunlock    best effort, vendor only logs a failure
-#   at+cfun=1                 best effort, likewise
+#   at+cfun=1                 omitted: ModemManager sets power state itself once
+#                             this returns 0
 #   at+gtfcclockstate         best effort, state read back
 #
 # The response is compute_sha256(): sha256 over the 14-byte vendor key, then
@@ -100,10 +101,11 @@ dmi_oem_string() {
     tail -c "+$((len + 1))" "$entry/raw" 2>/dev/null | tr '\000' '\n' | head -n 1
 }
 
-# 3df8c719 = sha256("KHOIHGIUCCHHII"), Lenovo, which Lenovo firmware publishes
-# 4909b5a4 = sha256("DW5931EFCCLOCK"), from Dell's FM350 driver
-# bb23be7f = sha256("DW5823EFCCLOCK"), from Dell's L860-R driver
-KNOWN_VENDOR_ID_HASHES='3df8c719 4909b5a4 bb23be7f'
+#   3df8c719 = sha256("KHOIHGIUCCHHII"), Lenovo, one id for every module
+# No Dell value is listed. Dell keys the id to the WWAN card and names it
+# after it (DW5823EFCCLOCK for the L860-R, DW5931EFCCLOCK for the FM350), so
+# neither applies to a Rolling module, and no Dell Rolling id is known.
+KNOWN_VENDOR_ID_HASHES='3df8c719'
 
 VENDOR_ID_HASHES=''
 DEVCODE="$(dmi_oem_string)"
@@ -157,7 +159,6 @@ for VENDOR_ID_HASH in $VENDOR_ID_HASHES; do
           if [ "$RESULT" = '1' ]; then
               log "  FCC unlock: SUCCESS"
               at_command 'at+gtfcclockmodeunlock' >/dev/null
-              at_command 'at+cfun=1' >/dev/null
               log "  FCC lock state: $(at_command 'at+gtfcclockstate')"
               log "result rc=0"
               exit 0

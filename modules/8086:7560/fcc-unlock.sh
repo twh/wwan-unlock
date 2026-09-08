@@ -13,7 +13,8 @@
 #   at+gtfcclockgen           challenge, at_send_command_singleline
 #   at+gtfcclockver=<n>       response, must reply 1
 #   at+gtfcclockmodeunlock    best effort, vendor only logs a failure
-#   at+cfun=1                 best effort, likewise
+#   at+cfun=1                 omitted: ModemManager sets power state itself once
+#                             this returns 0
 #   at+gtfcclockstate         best effort, state read back
 #
 # The response is compute_sha256(): sha256 over the 14-byte vendor key, then
@@ -69,10 +70,13 @@ dmi_oem_string() {
     tail -c "+$((len + 1))" "$entry/raw" 2>/dev/null | tr '\000' '\n' | head -n 1
 }
 
-# 3df8c719 = sha256("KHOIHGIUCCHHII"), Lenovo, which Lenovo firmware publishes
-# 4909b5a4 = sha256("DW5931EFCCLOCK"), from Dell's FM350 driver
-# bb23be7f = sha256("DW5823EFCCLOCK"), from Dell's L860-R driver
-KNOWN_VENDOR_ID_HASHES='3df8c719 4909b5a4 bb23be7f'
+#   3df8c719 = sha256("KHOIHGIUCCHHII"), Lenovo, one id for every module
+#   bb23be7f = sha256("DW5823EFCCLOCK"), Dell's name for this card, from its
+#              L860-R driver package, and the value !1141 uses
+# Dell keys the id to the WWAN card, not the machine: libmodemauth pairs
+# 8086:7560 with Dell subsystem 1028:5823 (DW5823e). So no other Dell value
+# can apply to this module.
+KNOWN_VENDOR_ID_HASHES='3df8c719 bb23be7f'
 
 VENDOR_ID_HASHES=''
 DEVCODE="$(dmi_oem_string)"
@@ -126,7 +130,6 @@ for VENDOR_ID_HASH in $VENDOR_ID_HASHES; do
           if [ "$RESULT" = '1' ]; then
               log "  FCC unlock: SUCCESS"
               at_command 'at+gtfcclockmodeunlock' >/dev/null
-              at_command 'at+cfun=1' >/dev/null
               log "  FCC lock state: $(at_command 'at+gtfcclockstate')"
               log "result rc=0"
               exit 0

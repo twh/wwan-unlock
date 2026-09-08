@@ -10,11 +10,15 @@
 #
 # Vendor sequence, verified against Lenovo's worker library:
 #
-#   at+gtfcclockgen           challenge, at_send_command_singleline
+#   at+gtfcclockgen           challenge, via send_at_of_mm
 #   at+gtfcclockver=<n>       response, must reply 1
-#   at+gtfcclockmodeunlock    best effort, vendor only logs a failure
-#   at+cfun=1                 best effort, likewise
-#   at+gtfcclockstate         best effort, state read back
+#   at+cfun=1                 omitted: ModemManager sets power state itself once
+#                             this returns 0, and upstream's 14c3 has unlocked
+#                             FM350s for years without it
+#   AT+GTFCCEFFSTATUS?        state read back
+#
+# event_monitor_at_fm350 sends no at+gtfcclockmodeunlock. That command is on the
+# event_monitor_at path, used by the L860R+ and the Rolling modules only.
 #
 # The response is compute_sha256(): sha256 over the 14-byte vendor key, then
 # sha256 over four bytes of that digest followed by four bytes of challenge,
@@ -69,10 +73,13 @@ dmi_oem_string() {
     tail -c "+$((len + 1))" "$entry/raw" 2>/dev/null | tr '\000' '\n' | head -n 1
 }
 
-# 3df8c719 = sha256("KHOIHGIUCCHHII"), Lenovo, which Lenovo firmware publishes
-# 4909b5a4 = sha256("DW5931EFCCLOCK"), from Dell's FM350 driver
-# bb23be7f = sha256("DW5823EFCCLOCK"), from Dell's L860-R driver
-KNOWN_VENDOR_ID_HASHES='3df8c719 4909b5a4 bb23be7f'
+#   3df8c719 = sha256("KHOIHGIUCCHHII"), Lenovo, one id for every module
+#   4909b5a4 = sha256("DW5931EFCCLOCK"), Dell's name for this card, from its
+#              FM350 driver package
+# Dell keys the id to the WWAN card, not the machine: libmodemauth pairs
+# 14c3:4d75 with Dell subsystem 1028:5931 (DW5931e). So no other Dell value
+# can apply to this module.
+KNOWN_VENDOR_ID_HASHES='3df8c719 4909b5a4'
 
 VENDOR_ID_HASHES=''
 DEVCODE="$(dmi_oem_string)"
@@ -107,9 +114,7 @@ for VENDOR_ID_HASH in $VENDOR_ID_HASHES; do
           RESULT="$(echo "$REPLY" | grep -o '[0-9][0-9]*' | tail -1)"
           if [ "$RESULT" = '1' ]; then
               log "  FCC unlock: SUCCESS"
-              at_command 'at+gtfcclockmodeunlock' >/dev/null
-              at_command 'at+cfun=1' >/dev/null
-              log "  FCC lock state: $(at_command 'at+gtfcclockstate')"
+              log "  FCC lock state: $(at_command 'AT+GTFCCEFFSTATUS?')"
               log "result rc=0"
               exit 0
           fi
