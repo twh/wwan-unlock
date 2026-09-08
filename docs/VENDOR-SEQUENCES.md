@@ -123,11 +123,19 @@ One code path serves all five ids; the library locates the AT port itself.
 
 | Order | Command | Send primitive | On failure |
 |---|---|---|---|
-| 1 | `at+gtfcclockgen` | `at_send_command_singleline` | retry |
-| 2 | `at+gtfcclockver=%lu` | `at_send_command_singleline` | result must be 1, else retry |
-| 3 | `at+gtfcclockmodeunlock` | `at_send_command` | logged only |
-| 4 | `at+cfun=1` | `at_send_command` | logged only |
-| 5 | `at+gtfcclockstate` | `at_send_command_singleline` | logged |
+| 1 | `at+gtfcclockgen` | `at_send_command_singleline` | `printf` then `exit(1)` |
+| 2 | `at+gtfcclockver=%lu` | `at_send_command_singleline` | `printf` then `exit(1)` |
+| 3 | `at+gtfcclockmodeunlock` | `at_send_command` | `printf` then `exit(1)` |
+| 4 | `at+cfun=1` | `at_send_command` | `printf` then `exit(1)` |
+| 5 | `at+gtfcclockstate` | `at_send_command_singleline` | `printf` then `exit(1)` |
+
+None of these is best effort. Every failure branch is `err < 0 ||
+resp->success == 0` and ends in `exit(1)`, which terminates
+`DPR_Fcc_unlock_service` itself. The only non-fatal outcome is a
+`at+gtfcclockver` value other than 1: `strtoul(resp->line, &end, 16)` is
+compared to 1 at `d1f9` and a mismatch jumps to `d3e8`, the `usleep(3000000)`
+loop tail, to retry. The prefix argument to `at_send_command_singleline` is the
+empty string at `0x14d20`, which is why no `+GTFCCLOCKVER:` form is required.
 
 Challenge parsing: `get_dev_code`, advance past `0x`, `strtoul` base 16.
 
@@ -192,8 +200,10 @@ init_modemauth_srvc: cmpl $0x2 -> "7560 R+ unlock called." -> fcc_at_modem_unloc
                                   -> event_monitor_at (0xb99b)
 ```
 
-That is the same five command sequence as `rw101`, and `compute_sha256`, so
-**little endian**. `ApprovedHWIDS` holds `8086:7560`; `ApprovedHWIDS_FM350` holds
+That is the same five command sequence as `rw101`, with the same
+log-then-`exit(1)` on every failure (`ba58`, `bb54`, `bc2d`, `bca9`, `bd57`) and
+the same `usleep` retry tail at `bda0`, and `compute_sha256`, so **little
+endian**. `ApprovedHWIDS` holds `8086:7560`; `ApprovedHWIDS_FM350` holds
 `14c3:4d75`.
 
 **Ours:** the five commands except `at+cfun=1`, both ends swapped.
@@ -225,17 +235,27 @@ rather than the modem:
   `DW5823EFCCLOCK`, `IntelWWANModemAuthenticator.exe` has `DW5931EFCCLOCK`, and
   both log `Not find SMBIOS FCC Type` on the fallback path
 
-| model id | sha256[0:4] | source |
-|---|---|---|
-| `KHOIHGIUCCHHII` | `3df8c719` | Lenovo firmware publishes it in SMBIOS |
-| `DW5931EFCCLOCK` | `4909b5a4` | Dell FM350 driver |
-| `DW5823EFCCLOCK` | `bb23be7f` | Dell L860-R driver |
+| model id | sha256[0:4] | source | carried as a fallback by |
+|---|---|---|---|
+| `KHOIHGIUCCHHII` | `3df8c719` | Lenovo firmware publishes it in SMBIOS | every AT dispatcher |
+| `DW5931EFCCLOCK` | `4909b5a4` | Dell FM350 driver | `14c3:4d75` only |
+| `DW5823EFCCLOCK` | `bb23be7f` | Dell L860-R driver | `8086:7560` only |
+
+The two Dell values are scoped to one id each and are not interchangeable. Dell
+keys the model id to the WWAN card and names it after the card; Lenovo uses one
+id for every module it ships. `libmodemauth` pairs `8086:7560` with Dell
+subsystem `1028:5823` and `14c3:4d75` with `1028:5931`, and the driver packages
+match: `DW5823EFCCLOCK` ships in the DW5823e package, `DW5931EFCCLOCK` in the
+DW5931e one. So a Dell value belongs only in the dispatcher for the card it
+names. The Rolling dispatchers carry the Lenovo value alone -- no Dell Rolling
+id is known.
 
 ## Where ours departs from the vendor
 
 | Departure | Applies to | Why |
 |---|---|---|
-| `at+cfun=1` omitted | all AT families | ModemManager sets power state itself once the dispatcher returns 0, and upstream's `14c3` has unlocked FM350s for years without it |
+| `at+cfun=1` omitted | all AT families | ModemManager sets the power state itself once the dispatcher returns 0. For `14c3` there is also direct evidence for that id: upstream's `14c3` script has unlocked FM350s for years without it |
+| trailing commands non-fatal | `event_monitor_at` families | the vendor `exit(1)`s if `at+gtfcclockmodeunlock` or the state read fails; the unlock is already effected once `gtfcclockver` replies 1, so ours logs and returns 0 |
 | Basic Connect radio state omitted | Quectel | same reason |
 | US-SIM gate omitted | all | it is in the dispatch function, not the message |
 | `dmidecode_query_lenovo_fcc_string` omitted | Quectel | its result is logged and never used |

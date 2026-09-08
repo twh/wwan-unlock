@@ -40,11 +40,18 @@ dot-separated fields dropped, the apps version, the IMEI, the salt and the magic
 `FDE2`. The magic is built on the stack as `ighU` and put through
 `b_char_value()`, which is `c ? c - 0x23 : 0`.
 
-**`at-gtfcclock`** — `event_monitor_at()` runs `at+gtfcclockgen`,
-`at+gtfcclockver=<n>` (which must reply 1), then `at+gtfcclockmodeunlock`,
-`at+cfun=1` and `at+gtfcclockstate`, the last three non-fatal. The response is
+**`at-gtfcclock`** — two functions, not one. `event_monitor_at()` runs
+`at+gtfcclockgen`, `at+gtfcclockver=<n>` (which must reply 1), then
+`at+gtfcclockmodeunlock`, `at+cfun=1` and `at+gtfcclockstate`.
+`event_monitor_at_fm350()` runs `at+gtfcclockgen`, `at+gtfcclockver=<n>`,
+`at+cfun=1` and `AT+GTFCCEFFSTATUS?` — no `at+gtfcclockmodeunlock`, and a
+different status command. None of them is non-fatal: on either path every
+failure branch logs and calls `exit(1)`, terminating `DPR_Fcc_unlock_service`.
+Only a `gtfcclockver` value other than 1 retries. The response is
 `compute_sha256()`: `sha256( sha256(key)[0:4] ++ challenge[0:4] )[0:4]`, sent as
-a decimal. The key is 14 bytes and its digest begins `3df8c719`.
+a decimal. The key is 14 bytes and its digest begins `3df8c719`. Byte order is
+per device — `compute_sha256()` is little endian, `compute_sha256_fm350()` big.
+See [VENDOR-SEQUENCES.md](VENDOR-SEQUENCES.md).
 
 `fccunlock_rw101` resolves only `init_modemauth_srvc` — no MBIM variant, no
 device path — so one code path serves all five Rolling ids and the library finds

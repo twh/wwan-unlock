@@ -12,10 +12,13 @@
 #
 #   at+gtfcclockgen           challenge, via send_at_of_mm
 #   at+gtfcclockver=<n>       response, must reply 1
-#   at+cfun=1                 omitted: ModemManager sets power state itself once
-#                             this returns 0, and upstream's 14c3 has unlocked
-#                             FM350s for years without it
-#   AT+GTFCCEFFSTATUS?        state read back
+#   at+cfun=1                 send_at_of_mm
+#   AT+GTFCCEFFSTATUS?        send_at_of_mm
+#
+# Every one of those is mandatory to the vendor: each failure branch LOGEs and
+# then calls exit(1). at+cfun=1 is not sent here, because ModemManager sets the
+# power state itself once this dispatcher returns 0, and upstream's 14c3 script
+# -- this same id -- has unlocked FM350s for years without it.
 #
 # event_monitor_at_fm350 sends no at+gtfcclockmodeunlock. That command is on the
 # event_monitor_at path, used by the L860R+ and the Rolling modules only.

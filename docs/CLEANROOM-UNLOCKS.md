@@ -61,15 +61,30 @@ Vendor paths:
   `init_modemauth_srvc()` on `/dev/wwan0at0`. The `init_modemauth_srvc_mbim()`
   branch is resolved but never chosen.
 
-Both libraries run the same sequence, in `event_monitor_at()`:
+They do not all run the same sequence. There are two functions:
 
-| Command | Sent via | Handling |
+`event_monitor_at()`, reached by the Rolling modules and the L860R+:
+
+| Command | Sent via | On failure |
 |---|---|---|
-| `at+gtfcclockgen` | `at_send_command_singleline` | challenge |
-| `at+gtfcclockver=%lu` | `at_send_command_singleline` | must reply 1 |
-| `at+gtfcclockmodeunlock` | `at_send_command` | failure only logged |
-| `at+cfun=1` | `at_send_command` | failure only logged |
-| `at+gtfcclockstate` | `at_send_command_singleline` | state read back |
+| `at+gtfcclockgen` | `at_send_command_singleline` | log, `exit(1)` |
+| `at+gtfcclockver=%lu` | `at_send_command_singleline` | log, `exit(1)`; a value other than 1 retries |
+| `at+gtfcclockmodeunlock` | `at_send_command` | log, `exit(1)` |
+| `at+cfun=1` | `at_send_command` | log, `exit(1)` |
+| `at+gtfcclockstate` | `at_send_command_singleline` | log, `exit(1)` |
+
+`event_monitor_at_fm350()`, reached by the FM350-GL:
+
+| Command | Sent via | On failure |
+|---|---|---|
+| `at+gtfcclockgen` | `send_at_of_mm` | `LOGE`, `exit(1)` |
+| `at+gtfcclockver=%lu` | `send_at_of_mm` | `LOGE`, `exit(1)` |
+| `at+cfun=1` | `send_at_of_mm` | `LOGE`, `exit(1)` |
+| `AT+GTFCCEFFSTATUS?` | `send_at_of_mm` | `LOGE`, `exit(1)` |
+
+It sends no `at+gtfcclockmodeunlock`, and its status command differs. Nothing on
+either path is best effort: every failure branch ends in `exit(1)`, which
+terminates `DPR_Fcc_unlock_service` itself.
 
 The challenge is located with `get_dev_code()`, advanced past the `0x` and parsed
 with `strtoul` base 16. The response comes from `compute_sha256()`:
@@ -81,16 +96,25 @@ Sha256_Init -> Sha256_Update(4) -> Sha256_Update(4) -> Sha256_Final
 
 That is `sha256( sha256(key)[0:4] ++ challenge[0:4] )[0:4]`, sent as a decimal.
 `0xe` is 14 bytes, the length of the key `KHOIHGIUCCHHII`, whose digest begins
-`3df8c719` — the vendor id hash the dispatchers carry.
+`3df8c719`. That value is not hard-coded: each dispatcher derives the hash from
+the machine's own SMBIOS type 133 OEM string and falls back to known values only
+when the firmware publishes none. The Lenovo `3df8c719` is the fallback every AT
+dispatcher carries; the two Dell values are scoped to the single card each one
+names — `4909b5a4` to `14c3:4d75`, `bb23be7f` to `8086:7560`. See
+[VENDOR-SEQUENCES.md](VENDOR-SEQUENCES.md).
 
-Two details taken from the vendor rather than assumed: it never matches a
-response prefix on `at+gtfcclockver` (it parses the value with `strtoul` and
-compares to 1), and the last three commands are non-fatal — a failure of any of
-them is logged and execution continues.
+One detail taken from the vendor rather than assumed: it never matches a
+response prefix on `at+gtfcclockver`. The prefix argument is the empty string,
+and the reply is parsed with `strtoul` and compared to 1.
 
-`at+cfun=1` is omitted from the success path only in the sense that ModemManager
-powers the radio up itself after the dispatcher returns 0; the dispatchers still
-send it, as the vendor does.
+The dispatchers depart from the vendor in two places, both deliberate:
+
+- `at+cfun=1` is not sent at all. ModemManager sets the power state itself once
+  the dispatcher returns 0. For `14c3:4d75` there is direct evidence for that
+  id: upstream's `14c3` script has unlocked FM350s for years without it.
+- a failure of `at+gtfcclockmodeunlock` or the state read is not fatal here,
+  where the vendor `exit(1)`s. The unlock is already effected once
+  `at+gtfcclockver` replies 1; those commands complete and read back the state.
 
 ## `mbimcli` — Quectel
 

@@ -12,10 +12,20 @@
 #
 #   at+gtfcclockgen           challenge, at_send_command_singleline
 #   at+gtfcclockver=<n>       response, must reply 1
-#   at+gtfcclockmodeunlock    best effort, vendor only logs a failure
-#   at+cfun=1                 omitted: ModemManager sets power state itself once
-#                             this returns 0
-#   at+gtfcclockstate         best effort, state read back
+#   at+gtfcclockmodeunlock    at_send_command
+#   at+cfun=1                 at_send_command
+#   at+gtfcclockstate         at_send_command_singleline
+#
+# Every one of those is mandatory to the vendor: each failure branch logs and
+# then calls exit(1). Only a gtfcclockver value other than 1 is retried rather
+# than fatal. We depart from that in two places, both deliberate:
+#
+#   at+cfun=1 is not sent. ModemManager sets the power state itself once this
+#   dispatcher returns 0.
+#
+#   a failure of at+gtfcclockmodeunlock or at+gtfcclockstate is not treated as
+#   fatal. The unlock is already effected by the time gtfcclockver replies 1;
+#   those two only complete and read back the state.
 #
 # The response is compute_sha256(): sha256 over the 14-byte vendor key, then
 # sha256 over four bytes of that digest followed by four bytes of challenge,
