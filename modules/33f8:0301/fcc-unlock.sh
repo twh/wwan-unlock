@@ -86,18 +86,18 @@ at_command() {
 #
 # A machine can have more than one type 133 record: Lenovo ships a small one
 # whose string table holds the id, alongside a 44 byte one that has no strings
-# at all. Dell's Latitude 5540 has only the latter. So iterate every record and
-# take the first that yields a string, and keep known values for firmware that
-# publishes none.
+# at all. Dell's Latitude 5540 has only the latter, which is why known values
+# are kept below for firmware that publishes none.
+#
+# Read 133-0, as ModemManager!1491 does. On every machine anyone has examined
+# the string bearing record is the first one, and no machine has been observed
+# where it is not. Read from DMI sysfs rather than dmidecode, to avoid
+# executing another binary.
 dmi_oem_string() {
-    for _e in /sys/firmware/dmi/entries/133-*; do
-        [ -d "$_e" ] || continue
-        _len="$(cat "$_e/length" 2>/dev/null)" || continue
-        [ -n "$_len" ] || continue
-        _s="$(tail -c "+$((_len + 1))" "$_e/raw" 2>/dev/null | tr '\000' '\n' | head -n 1)"
-        [ -n "$_s" ] && { echo "$_s"; return 0; }
-    done
-    return 1
+    entry='/sys/firmware/dmi/entries/133-0'
+    len="$(cat "$entry/length" 2>/dev/null)" || return 1
+    [ -n "$len" ] || return 1
+    tail -c "+$((len + 1))" "$entry/raw" 2>/dev/null | tr '\000' '\n' | head -n 1
 }
 
 # 3df8c719 = sha256("KHOIHGIUCCHHII"), Lenovo, which Lenovo firmware publishes
