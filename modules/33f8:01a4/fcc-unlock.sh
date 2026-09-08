@@ -120,6 +120,24 @@ for KNOWN in $KNOWN_VENDOR_ID_HASHES; do
     esac
 done
 
+# This modem hashes the challenge as a little endian u32, and reads the first
+# four bytes of the digest back as one. Lenovo's libmodemauth carries one hash
+# function per device and they differ only in that byte placement:
+#
+#   compute_sha256        MSB at the higher address -> little endian
+#                         used by 8086:7560 and, via event_monitor_at, by the
+#                         Rolling modules
+#   compute_sha256_fm350  MSB at the lower address  -> big endian
+#                         used by 14c3:4d75, which is why the upstream 14c3
+#                         script needs no swap
+#
+# So swap both ends here. ModemManager!1141 and the write-up at
+# blog.hofstede.it/replacing-lenovos-wwan-unlock-blob-with-a-100-line-bash-script
+# arrived at the same little endian handling for 8086:7560 independently.
+swap32() {
+    printf '%s' "$1" | sed 's/\(..\)\(..\)\(..\)\(..\)/\4\3\2\1/'
+}
+
 log "invoked: $DEVICE (clean-room AT challenge/response)"
 i=1
 for VENDOR_ID_HASH in $VENDOR_ID_HASHES; do
@@ -127,10 +145,10 @@ for VENDOR_ID_HASH in $VENDOR_ID_HASHES; do
       RAW="$(at_command 'at+gtfcclockgen')"
       CHALLENGE="$(echo "$RAW" | grep -o '0x[0-9a-fA-F]\+' | awk '{print $1}')"
       if [ -n "$CHALLENGE" ]; then
-          HEX="$(printf '%08x' "$CHALLENGE")"
+          HEX="$(swap32 "$(printf '%08x' "$CHALLENGE")")"
           COMBINED="$HEX$(printf '%.8s' "$VENDOR_ID_HASH")"
           HASH="$(echo "$COMBINED" | xxd -r -p | sha256sum | cut -d ' ' -f 1)"
-          RESPONSE="$(printf '%d' "0x$(printf '%.8s' "$HASH")")"
+          RESPONSE="$(printf '%d' "0x$(swap32 "$(printf '%.8s' "$HASH")")")"
           REPLY="$(at_command "at+gtfcclockver=$RESPONSE")"
 
           # the vendor does not match a response prefix: it parses the value with
