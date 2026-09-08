@@ -1,71 +1,78 @@
 # Hardware status
 
-Every FCC-unlock family in Lenovo's `DPR_Fcc_unlock_service`, and how `wwan-orch`
-handles it. `wwan-orch` is a clean-room transcription of Lenovo's per-family
-dispatch that `dlopen()`s Lenovo's own bundled libraries and calls their unlock
-functions in the same order — omitting only the US-SIM check
-(`GetCountry` / `get_country_code` / `location_is_USA`). Every claim below was
-verified against the (non-stripped) vendor binaries.
+Every FCC unlock in `modules/` is clean-room and derived from Lenovo's own SDK.
+For each modem the vendor's code path was read out of `DPR_Fcc_unlock_service`
+and the worker library it `dlopen()`s, and the messages it sends are reproduced
+with stock tooling. No Lenovo library is loaded during an unlock; the bundled
+libraries and `wwan-orch` are used for RF/SAR only.
 
-| `--family` | Modem(s) | Lenovo dispatch | Lenovo lib | Gate omitted |
+Every claim below is pinned to the (non-stripped) vendor binaries. The full
+derivation, with addresses, is in [CLEANROOM-UNLOCKS.md](CLEANROOM-UNLOCKS.md).
+
+## Where each unlock came from
+
+| ID(s) | Modem | Vendor dispatch | Vendor library | Our mechanism |
 |---|---|---|---|---|
-| `fxn`   | Foxconn T99W696 (SDX61/62) | `setFccUnlock_fxn` | `libfiisdk.so.2.2.2` | `GetCountry` |
-| `cs24`  | Quectel RM520N/EM160/EM061/**EM05** | `setFccUnlock_cs24` | `libmbimtools.so` | `location_is_USA` |
-| `rw101` | Rolling RW101R-GL | `fccunlock_rw101` | `libmodemauthRW101.so.1.1` | `get_country_code` |
-| `rw350` | Rolling RW350 | `fccunlock_rw350` | `libmodemauth.so.1.1` | `get_country_code` |
-| `fm350` | Fibocom FM350 | `fccunlock_fm350_l860` | `libmodemauth.so` | `get_country_code` |
-| `l860`  | Fibocom L860R+ | `fccunlock_fm350_l860` | `libmodemauth.so` | `get_country_code` |
+| `17cb:0308` | Foxconn T99W696 (SDX61) | `setFccUnlock_fxn` | `libfiisdk.so.2.2.2` | `foxunlock` |
+| `33f8:0301` | Rolling RW101R-GL | `fccunlock_rw101` | `libmodemauthRW101.so.1.1` | `at-gtfcclock` |
+| `33f8:01a4/01a8/01a9/0302` | Rolling RW101R-GL | `fccunlock_rw101` | `libmodemauthRW101.so.1.1` | `at-gtfcclock` |
+| `14c3:4d75` | Fibocom FM350-GL | `fccunlock_fm350_l860` | `libmodemauth.so` | `at-gtfcclock` |
+| `8086:7560` | Fibocom L860R+ | `fccunlock_fm350_l860` | `libmodemauth.so` | `at-gtfcclock` |
+| `1eac:100d` | Quectel EM160R-GL | `setFccUnlock_cs24` | `libmbimtools.so` | `mbimcli` |
+| `1eac:1007` | Quectel RM520N-GL | `setFccUnlock_cs24` | `libmbimtools.so` | `mbimcli` |
+| `2c7c:6008` | Quectel EM061K | `setFccUnlock_cs24` | `libmbimtools.so` | `mbimcli` |
+| `2c7c:030a` | Quectel EM05-G | `setFccUnlock_cs24` | `libmbimtools.so` | `mbimcli` |
+| `2c7c:0310` | Quectel EM05-CN | `setFccUnlock_cs24` | `libmbimtools.so` | `mbimcli` |
 
-Bundled modules and their family:
+That is every id in Lenovo's own `fcc-unlock.d` list, plus the two EM05 variants.
 
-| ID(s) | Module | Family | Status |
-|---|---|---|---|
-| `17cb:0308` | Foxconn T99W696 | `fxn` | **verified on hardware** (X1 Carbon Gen 14) |
-| `1eac:100d` | Quectel EM160R-GL | `cs24` | transcribed, unverified |
-| `33f8:0301` | Rolling RW101R-GL | `rw101` | **FCC verified on hardware** (X1 Carbon Gen 14) |
-| `33f8:01a4/01a8/01a9/0302` | Rolling RW101R-GL | `rw101` | transcribed, unverified |
-| `8086:7560` | Fibocom L860R+ | `l860` | transcribed, unverified |
+The US-SIM gate (`GetCountry`, `get_country_code`, `location_is_USA`) lives in
+the `DPR_Fcc_unlock_service` caller in every family, never in the message
+builder, so omitting it changes nothing about the unlock.
 
-## RW101R-GL `33f8:0301` verification
+## Three mechanisms
 
-The FCC unlock was verified on 2026-08-10 on a ThinkPad X1 Carbon Gen 14
-(`21V7CTO1WW`) with an RW101R-GL running firmware `19512.0000.00.11.03.01` and a
-US SIM. The modem exposes `/dev/cdc-wdm0` for MBIM and `/dev/ttyUSB0` for AT.
+**`foxunlock`** — `Fox_Attempt()` -> `FoxApSetFccLockStatus()` ->
+`QMIFOXAPSetFccLockStatus()`, which composes service byte `0xE4` and message id
+`0x5571`. TLV `0x01` is a 4-char salt plus lowercase md5 hex; TLV `0x02` is one
+byte, `'0'` to unlock. The md5 input is the mcfg version with its last two
+dot-separated fields dropped, the apps version, the IMEI, the salt and the magic
+`FDE2`. The magic is built on the stack as `ighU` and put through
+`b_char_value()`, which is `c ? c - 0x23 : 0`.
 
-**The AT port needs a kernel that knows `33f8:0301`.** The `option` usb-serial
-driver only claims this id from commit `523bf0a59e67` ("USB: serial: option: add
-support for the Rolling RW101R-GL modules", 2025-11-10), backported to **6.12.61**,
-**6.6.119** and **5.15.197**. On anything older no `/dev/ttyUSB*` appears, the modem
-is MBIM-only, and the dispatcher exits `2` with "no AT port" — reported on Rocky
-Linux 10.2, whose 6.12.x kernel predates the backport, on a ThinkPad T14 AMD Gen 7
-with firmware `19512.0000.00.11.03.01_VZ E37`.
+**`at-gtfcclock`** — `event_monitor_at()` runs `at+gtfcclockgen`,
+`at+gtfcclockver=<n>` (which must reply 1), then `at+gtfcclockmodeunlock`,
+`at+cfun=1` and `at+gtfcclockstate`, the last three non-fatal. The response is
+`compute_sha256()`: `sha256( sha256(key)[0:4] ++ challenge[0:4] )[0:4]`, sent as
+a decimal. The key is 14 bytes and its digest begins `3df8c719`.
 
-The fix is either a kernel at or past those versions, or the bundled
-[`99-rw101r-serial.rules`](../modules/33f8:0301/99-rw101r-serial.rules), which
-`modprobe`s `option` and registers the id via `new_id`. `install.sh` checks for a
-bound `ttyUSB` and installs the rule only when one is missing; `--uninstall`
-removes it. Loading `usbserial` or `usb_wwan` explicitly is unnecessary — `option`
-depends on both and `modprobe` pulls them in.
+`fccunlock_rw101` resolves only `init_modemauth_srvc` — no MBIM variant, no
+device path — so one code path serves all five Rolling ids and the library finds
+the AT port itself. `fccunlock_fm350_l860` is called with transport selector 1 at
+every call site, for the FM350-GL and the L860R+ alike, resolving
+`init_modemauth_srvc()` on `/dev/wwan0at0`.
 
-On this firmware, the Fibocom MBIM AT service returns `ERROR` for
-`AT+GTFCCLOCKGEN`, while the serial AT port returns a valid challenge. The
-`33f8:0301` dispatcher therefore loads `rw101-serial.so` with `LD_PRELOAD`. The
-shim overrides the worker library's preemptible `get_mbim_port` and
-`send_at_of_mm` transport functions, but leaves its challenge calculation,
-unlock sequence, and bundled binary unchanged. A verified run ended with:
+**`mbimcli`** — `mbim_radio_state_set()` composes an MBIM SET on uuid
+`11223344-5566-7788-99aa-bbccddeeff11` cid 1, then one on
+`a289cc33-bcbb-8b4f-b6b0-133ec2aae6df` cid 3. The first is libmbim's
+`uuid_quectel` with `MBIM_CID_QUECTEL_RADIO_STATE`, which is what
+`--quectel-set-radio-state=on` sends; the second is Basic Connect radio state,
+which only powers the radio up, and ModemManager does that itself.
 
-```
-invoked: /dev/cdc-wdm0 via /dev/ttyUSB0 (family rw101)
-FCC unlock: SUCCESS
-result rc=0
-```
+EM05 routes here too: `setFccUnlock_em05` `dlopen()`s `/usr/lib/mbim2sar_em05.so`,
+which no Lenovo package ships, so that path is inert.
 
-The complete vendor retry sequence took about 12 seconds. ModemManager 1.24.2
-has a hard-coded five-second FCC dispatcher timeout, so this verification used a
-30-second timeout. Systems retaining the five-second default will kill the
-dispatcher before it can report success. This is an FCC-unlock verification
-only: RW101 SAR/device-pack provisioning was not exercised and the verified
-module deliberately does not enable it.
+## Rolling serial AT port
+
+The RW101R-GL answers its challenge on a `ttyUSB` port rather than the wwan AT
+service, so the `option` driver must have bound to the device. Linux 6.18 added
+`33f8:01a8`, `01a9`, `0301` and `0302` to that driver's id table in commit
+`523bf0a59e67`, also present in the stable backports; only `33f8:01a4` is older.
+On an earlier kernel no `/dev/ttyUSB` is created and the dispatcher exits 2. The
+installer adds `99-rw101r-serial.rules` when it finds no bound port.
+
+ModemManager 1.24.2 has a hard-coded five-second FCC dispatcher timeout. The
+vendor's own retry sequence can exceed that, so a longer timeout may be needed.
 
 ## SAR
 
@@ -108,8 +115,7 @@ ship in `sar_config_files.tar.gz`; the `cs25/` filenames embed the machine type,
 glob picks the same chassis file. The **only** reimplemented piece is `get_nv_<model>`
 (it lives in the gated binary): each `strstr`s the NV-version from the filename and
 returns it (e.g. `29619`), which `sar_quectel()` reproduces by reading the trailing
-`..._<nvver>.bin` integer. `unverified` (no Quectel hardware); only `fxn` SAR is
-hardware-tested. (An earlier build that mis-modelled the apply — passing a bare path
+`..._<nvver>.bin` integer. (An earlier build that mis-modelled the apply — passing a bare path
 where a `sar_file_info*` was expected — was caught by review and rewritten to reuse
 `ops[6]`/`ops[5]` as above.)
 
@@ -142,7 +148,7 @@ its `.bin`; EM05-G uses the extracted `DPRConfig.xml`) → `set_sar_value(info, 
 project, processor, 0)` → `uninit`, where `project` = DMI product family and
 `processor` = Intel/AMD. `DPRConfig.xml` is extracted at install from Lenovo's own
 unmodified `configservice_lenovo` (bundled in `vendor/lenovo/`). The US-SIM gate is
-not in any SAR path (only in the FCC `setFccUnlock_em05`). `unverified` (no EM05 hw).
+not in any SAR path (only in the FCC `setFccUnlock_em05`).
 
 Two known behavioural notes vs stock, both confirmed non-defects by a full
 disassembly review:
@@ -166,11 +172,12 @@ disassembly review:
 
 ## Notes
 
-- **"Transcribed"** = calls Lenovo's *tested* library exactly as their orchestrator
-  does, so correctness follows from the disassembly, not a reimplemented algorithm.
-  The `fxn` family and RW101 `33f8:0301` FCC path have been run on real hardware;
-  the installer warns before installing an unverified module. A failed FCC unlock
-  is not destructive — it leaves the radio disabled, recoverable by `--uninstall`.
+- **The unlocks** are derived from the vendor SDK, not reimplemented from guesswork:
+  each message is the one Lenovo's own library composes for that modem, read out of
+  the disassembly and reproduced with stock tooling. A failed FCC unlock is not
+  destructive — it leaves the radio disabled, recoverable by `--uninstall`.
+- **SAR** is different: it still calls Lenovo's libraries through `wwan-orch`, and
+  the per-family notes above mark which of those paths have been exercised.
 - **EM05 (`mbim2sar_em05.so`)**: for **FCC**, `DPR_Fcc_unlock_service`'s
   `setFccUnlock_em05` (which loads `/usr/lib/mbim2sar_em05.so`) is **dead code —
   zero call sites**; `main` dispatches every Quectel modem, EM05 included, through

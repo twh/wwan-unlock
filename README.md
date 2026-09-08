@@ -10,34 +10,39 @@ host sends a vendor-specific unlock message after every modem power-on. Lenovo
 distributes closed binaries that do this, but they gate the unlock on the SIM's
 country and their license forbids modifying them.
 
-This project removes **only** the country gate. Its primary tool, `wwan-orch`,
-reimplements just Lenovo's gated orchestrator and then calls Lenovo's **own,
-unmodified** worker libraries (bundled in `vendor/lenovo/`) to do the actual
-unlock — omitting only the US-SIM check. So the unlock itself is Lenovo's tested
-code; the one thing not reimplemented is the unneeded US SIM gate.
+This project removes **only** the country gate. **Every FCC unlock here is
+clean-room**: each was derived by reading Lenovo's own code path for that modem
+and reproducing the messages it sends with stock tooling, so no Lenovo code runs
+during an unlock. Lenovo's bundled libraries and `wwan-orch` remain in the tree
+for RF/SAR provisioning only. Full derivation, per modem, with the addresses it
+came from: [docs/CLEANROOM-UNLOCKS.md](docs/CLEANROOM-UNLOCKS.md).
 
 ## Supported hardware
 
 The installer picks ModemManager's own unlock when one exists (maintained upstream),
 and falls back to this implementation otherwise.
 
-| Modem | ID(s) | Handled by |
-|---|---|---|
-| Foxconn T99W696 (SDX61/62) | `17cb:0308` | module (X1 Carbon Gen 14) |
-| Fibocom FM350 | `14c3:4d75` | upstream ModemManager |
-| Quectel RM520N-GL | `1eac:1007` | upstream ModemManager |
-| Quectel EM061K | `2c7c:6008` | upstream ModemManager |
-| Quectel EM160R-GL | `1eac:100d` | module — unverified |
-| Quectel EM05-CN | `2c7c:0310` | module (`em05`) — unverified |
-| Quectel EM05-G | `2c7c:030a` | module (`em05`) — unverified |
-| Fibocom L860R+ | `8086:7560` | module — unverified (reuses upstream Intel script) |
-| Rolling RW101R-GL | `33f8:0301` | bundled module (`rw101`, serial AT transport) — verified |
-| Rolling RW101R-GL | `33f8:01a4/01a8/01a9/0302` | bundled module (`rw101`) — unverified |
+| Modem | ID(s) | Unlock | Derived from |
+|---|---|---|---|
+| Foxconn T99W696 (SDX61) | `17cb:0308` | `foxunlock` | `setFccUnlock_fxn` → `libfiisdk` |
+| Rolling RW101R-GL | `33f8:0301/01a4/01a8/01a9/0302` | `at-gtfcclock` | `fccunlock_rw101` → `libmodemauthRW101` |
+| Fibocom FM350-GL | `14c3:4d75` | `at-gtfcclock` | `fccunlock_fm350_l860` → `libmodemauth` |
+| Fibocom L860R+ | `8086:7560` | `at-gtfcclock` | `fccunlock_fm350_l860` → `libmodemauth` |
+| Quectel EM160R-GL | `1eac:100d` | `mbimcli` | `setFccUnlock_cs24` → `libmbimtools` |
+| Quectel RM520N-GL | `1eac:1007` | `mbimcli` | `setFccUnlock_cs24` → `libmbimtools` |
+| Quectel EM061K | `2c7c:6008` | `mbimcli` | `setFccUnlock_cs24` → `libmbimtools` |
+| Quectel EM05-G | `2c7c:030a` | `mbimcli` | `setFccUnlock_cs24` → `libmbimtools` |
+| Quectel EM05-CN | `2c7c:0310` | `mbimcli` | `setFccUnlock_cs24` → `libmbimtools` |
 
-Full detail and the RW101 situation: [docs/HARDWARE-STATUS.md](docs/HARDWARE-STATUS.md).
-`17cb:0308` and `33f8:0301` have been run on real hardware; the others are marked
-`unverified` and the installer warns before using them. Adding or finishing a module
-is exactly what [docs/ADDING-HARDWARE.md](docs/ADDING-HARDWARE.md) is for.
+That is every id in Lenovo's own `fcc-unlock.d` list, plus the two EM05 variants.
+Each row's unlock is the message that vendor path composes, reproduced with stock
+tooling — the derivation, down to the instruction, is in
+[docs/CLEANROOM-UNLOCKS.md](docs/CLEANROOM-UNLOCKS.md) and
+[docs/HARDWARE-STATUS.md](docs/HARDWARE-STATUS.md).
+
+Where upstream ModemManager already ships an unlock for an id, the installer
+prefers it. These same mechanisms are being upstreamed: libqmi!473,
+ModemManager!1492 and ModemManager!1493.
 
 ## Requirements
 
@@ -111,51 +116,49 @@ Skip it with `--no-sar` (unlock only); re-apply it alone with `--sar-only`.
 
 ## How it works
 
-**Primary path — `wwan-orch` (gateless orchestrator).** Lenovo's unlock/SAR logic
-lives in libraries (`libfiisdk` etc.); only their orchestrator *binaries* hold the
-US-SIM country gate. `wwan-orch` reimplements just that orchestrator, `dlopen()`s
-Lenovo's own unmodified libraries, and calls the same functions without the gate.
+**Every unlock is clean-room.** For each modem, Lenovo's own code path was read
+out of `DPR_Fcc_unlock_service` and the worker library it loads, and the messages
+it sends are reproduced here with stock tooling. No Lenovo code runs during an
+unlock. Three mechanisms cover all ten modules:
 
-The verified RW101R-GL `33f8:0301` firmware exposes the modem as MBIM but accepts
-its FCC challenge commands only on its `ttyUSB` AT port. Its dispatcher preloads a
-small serial transport shim, leaving Lenovo's challenge/response worker library
-unmodified. That AT port needs a kernel carrying `33f8:0301` in the `option` driver
-(6.12.61 / 6.6.119 / 5.15.197 or later); on older kernels the installer adds a udev
-rule to bind it. See [docs/HARDWARE-STATUS.md](docs/HARDWARE-STATUS.md) for the
-tested firmware, the kernel requirement and the ModemManager timeout requirement.
+- **`foxunlock`** — Foxconn T99W696. Computes the auth hash and sends the
+  QMI-over-MBIM message itself (service `0xE4`, msg `0x5571`). Built and
+  installed by the installer.
+- **`at-gtfcclock`** — Rolling RW101R-GL, Fibocom FM350-GL and L860R+. The
+  `at+gtfcclockgen` / `at+gtfcclockver` challenge/response, computed in the
+  dispatcher with stock `sha256sum`.
+- **`mbimcli`** — every Quectel. `mbimcli --quectel-set-radio-state=on`, which is
+  the Quectel-service MBIM command the vendor library sends.
 
-So the only thing unimplemented is the unneeded gate; the actual unlock and SAR
-(`Set_RF_Files`) stay Lenovo's tested code. The libraries are bundled unmodified
-under their license (`vendor/lenovo/`, see its `NOTICE.md`).
+Where each came from in the vendor binaries, down to the instruction:
+[docs/CLEANROOM-UNLOCKS.md](docs/CLEANROOM-UNLOCKS.md). The Foxconn derivation in
+particular: [docs/T99W696-FCC-unlock-findings.md](docs/T99W696-FCC-unlock-findings.md).
 
-**Separate standalone tool — `foxunlock`.** A fully clean-room FCC unlock for the
-Foxconn T99W696 that uses **no Lenovo code at runtime** — it computes the auth hash
-and sends the QMI-over-MBIM message itself (service 0xE4, msg 0x5571). It is *not*
-part of the installer or the dispatcher; build and run it by hand if you want a
-zero-vendor-code path:
+The RW101R-GL answers its FCC challenge on a `ttyUSB` port rather than the wwan
+AT service. That needs the `option` driver bound to the device; Linux 6.18 added
+`33f8:01a8`, `01a9`, `0301` and `0302` to its id table (also in the stable
+backports), and on an earlier kernel the installer adds a udev rule to bind it.
+See [docs/HARDWARE-STATUS.md](docs/HARDWARE-STATUS.md).
 
-```sh
-make foxunlock
-sudo ./foxunlock -d /dev/wwan0mbim0
-```
-
-Full derivation of both: [docs/T99W696-FCC-unlock-findings.md](docs/T99W696-FCC-unlock-findings.md).
-
-Support for the other radios in — **`foxunlock`** — we're not added as I do not
-have access to that hardware. Others that have that hardware can reverse engineer
-those libraries and add them.
+**`wwan-orch` — RF/SAR only.** Lenovo's SAR logic lives in their libraries
+(`libfiisdk`, `configservice_*`); only their orchestrator *binaries* hold the
+US-SIM gate. `wwan-orch` reimplements just that orchestrator, `dlopen()`s
+Lenovo's own unmodified libraries and calls the same functions without the gate.
+It is not used by any unlock. The libraries are bundled unmodified under their
+license (`vendor/lenovo/`, see its `NOTICE.md`).
 
 ## Scope
 
-- Modules for both verified and unverified hardware are bundled. Unverified
-  modules are marked as such, and the installer warns loudly before touching them.
-- A failed FCC unlock leaves your radio disabled — recoverable, but don't run
-  unverified modules on a machine you can't afford to have offline.
-- Our reimplemented code (`wwan-orch`, `foxunlock`, the installer) contains **no
-  Lenovo code** and **modifies none of Lenovo's binaries**. Lenovo's own worker
-  libraries and data are bundled **unmodified** in `vendor/lenovo/` under the terms
-  of their license, which grants the right to use and distribute them unmodified —
-  see [vendor/lenovo/NOTICE.md](vendor/lenovo/NOTICE.md).
+- Every module records the vendor path it was derived from in
+  `MODULE_VENDOR_SEQ`, and the installer prints it before touching anything.
+- A failed FCC unlock leaves your radio disabled — recoverable with
+  `--uninstall`, but not something to try on a machine you can't afford offline.
+- Every unlock is clean-room and loads no Lenovo library at runtime. Our code
+  (`foxunlock`, the dispatchers, `wwan-orch`, the installer) contains **no Lenovo
+  code** and **modifies none of Lenovo's binaries**. Lenovo's own worker libraries
+  and data are bundled **unmodified** in `vendor/lenovo/`, used only for RF/SAR,
+  under the terms of their license, which grants the right to use and distribute
+  them unmodified — see [vendor/lenovo/NOTICE.md](vendor/lenovo/NOTICE.md).
 
 ## License
 

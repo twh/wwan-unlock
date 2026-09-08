@@ -1,5 +1,5 @@
 #!/bin/sh
-# Clean-room FCC unlock dispatcher for the Quectel EM05-G (2c7c:030a).
+# Clean-room FCC unlock dispatcher for the Quectel RM520N-GL (1eac:1007).
 # Uses no Lenovo code: stock mbimcli sends the same message the vendor sends.
 #
 # Vendor sequence (DPR_Fcc_unlock_service -> setFccUnlock_cs24), verified against

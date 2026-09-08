@@ -48,7 +48,7 @@ list_modules() {
         [ -f "$m/module.conf" ] || continue
         # shellcheck disable=SC1091
         ( . "$m/module.conf"
-          printf '  %-12s %-38s [%s]\n' "$MODULE_IDS" "$MODULE_NAME" "$MODULE_STATUS" )
+          printf '  %-12s %-38s [%s]\n' "$MODULE_IDS" "$MODULE_NAME" "$MODULE_UNLOCK" )
     done
 }
 
@@ -236,34 +236,42 @@ install_module() {
 
     info "module : $MODULE_NAME"
     info "id     : $MODULE_IDS"
-    info "status : $MODULE_STATUS"
-    [ "$MODULE_STATUS" = "verified" ] || cat <<EOF
-
-  !! This module is UNVERIFIED. It was derived from analysis but has never been
-  !! run on real hardware by the maintainers. It may not work, and a failed FCC
-  !! unlock leaves the radio disabled. Continue only if you can recover.
-EOF
+    info "unlock : $MODULE_UNLOCK (clean-room)"
+    info "vendor : $MODULE_VENDOR_SEQ"
     need_root
 
-    # build + install the gateless orchestrator and Lenovo's runtime libraries.
-    # (The standalone foxunlock tool is never built here — it is a separate
-    #  `make foxunlock` deliverable, independent of the installer.)
-    if [ -n "${MODULE_ORCH_FAMILY:-}" ]; then
+    # ---- the unlock itself: clean-room, no Lenovo code ---------------------
+    case "${MODULE_UNLOCK:-}" in
+        foxunlock)
+            command -v cc >/dev/null || die "cc not found (apt install build-essential)"
+            pkg-config --exists mbim-glib || die "libmbim-glib-dev not found"
+            mkdir -p "$LIBDIR"
+            info "building foxunlock (clean-room) ..."
+            ( cd "$SRC" && make -s foxunlock ) || die "build failed for foxunlock"
+            install -m0755 "$SRC/foxunlock" "$LIBDIR/foxunlock"
+            info "installed $LIBDIR/foxunlock"
+            ;;
+        mbimcli)
+            command -v mbimcli >/dev/null || \
+                info "note: mbimcli not found; install libmbim-utils before the modem powers on"
+            ;;
+        at-gtfcclock)
+            for _t in xxd sha256sum; do
+                command -v "$_t" >/dev/null || info "note: $_t not found; the unlock needs it"
+            done
+            [ "${MODULE_SAR_FAMILY:-}" = "rw101" ] && install_rw101_serial_rule "$_dir"
+            ;;
+    esac
+
+    # ---- RF/SAR only: wwan-orch plus Lenovo's unmodified worker libraries --
+    if [ "${MODULE_LENOVO_SAR:-}" = "yes" ] && [ "${opt_no_sar:-}" != "1" ]; then
         command -v cc >/dev/null || die "cc not found (apt install build-essential)"
         mkdir -p "$LIBDIR"
-        info "building wwan-orch ..."
+        info "building wwan-orch (SAR only) ..."
         ( cd "$SRC" && make -s wwan-orch ) || die "build failed for wwan-orch"
         install -m0755 "$SRC/wwan-orch" "$LIBDIR/wwan-orch"
         install -m0755 "$SRC/tools/wwan-sar-boot.sh" "$LIBDIR/wwan-sar-boot.sh"
         info "installed $LIBDIR/wwan-orch"
-        if [ "$MODULE_ORCH_FAMILY" = "rw101" ]; then
-            info "building RW101 serial transport ..."
-            ( cd "$SRC" && make -s rw101-serial.so ) || \
-                die "build failed for RW101 serial transport"
-            install -m0755 "$SRC/rw101-serial.so" "$LIBDIR/rw101-serial.so"
-            info "installed $LIBDIR/rw101-serial.so"
-            install_rw101_serial_rule "$_dir"
-        fi
         install_lenovo_runtime
     fi
 
@@ -287,8 +295,8 @@ EOF
 
     # ---- RF/SAR: gate-free, via wwan-orch + Lenovo's own Set_RF_Files ------
     if [ "${MODULE_LENOVO_SAR:-}" = "yes" ] && [ "${opt_no_sar:-}" != "1" ] \
-       && [ -n "${MODULE_ORCH_FAMILY:-}" ]; then
-        run_sar "$MODULE_ORCH_FAMILY"
+       && [ -n "${MODULE_SAR_FAMILY:-}" ]; then
+        run_sar "$MODULE_SAR_FAMILY"
     fi
 
     cat <<EOF

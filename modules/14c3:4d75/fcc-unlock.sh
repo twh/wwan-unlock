@@ -1,6 +1,6 @@
 #!/bin/sh
-# Clean-room FCC unlock dispatcher for the Fibocom L860R+.
-#   L860R+, 8086:7560
+# Clean-room FCC unlock dispatcher for the Fibocom FM350-GL.
+#   FM350-GL, 14c3:4d75
 # Uses no Lenovo code: the challenge/response is computed here with stock
 # sha256sum.
 #

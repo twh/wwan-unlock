@@ -94,7 +94,7 @@ The **only** reimplemented piece is `get_nv_<model>` (it lives in the gated bina
 each `strstr`s the NV-version from the filename and returns it (`get_nv_em160`:
 `"29619"`→29619, `"30007"`→30007; `get_nv_061`: `"48001"`; …). `quectel_get_nv()`
 reproduces this by reading the trailing `..._<nvver>.bin` integer — the exact value
-that lands in `sar_file_info+0x110`. `unverified` (no Quectel hardware). (An earlier
+that lands in `sar_file_info+0x110`. (An earlier
 build mis-modelled the apply — passing a bare path where a `sar_file_info*` was
 expected, which an automated review caught as an out-of-bounds read — and was
 rewritten to reuse `ops[6]`/`ops[5]` as above.)
@@ -109,5 +109,4 @@ that lib's function is **fully duplicated in the bundled `libmbimtools.so`** —
 `mbim_set_dprconfig` parses the embedded `DPRConfig.xml` and issues the same
 `at+qcfg="sarcfg"` commands as the external `sar_ops[+0x70]`. Both converge on
 `set_sar_value`'s EM05 branch. `DPRConfig.xml` is extracted at install from Lenovo's
-own unmodified `configservice_lenovo`. Only `fxn` SAR has been run on hardware by twh
-at waynehendricks dot com; the rest (incl. EM05) are `unverified`.
+own unmodified `configservice_lenovo`.

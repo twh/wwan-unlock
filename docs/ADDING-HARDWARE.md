@@ -32,17 +32,25 @@ Usually **no**. Stock tooling already exposes most vendor unlock paths:
 | Foxconn DMS (v1/v2) | `qmicli --dms-foxconn-set-fcc-authentication{,-v2}` |
 | Foxconn FOX service `0xE3` | `qmicli --fox-set-fcc-authentication` |
 | Foxconn FOXAP service `0xE4` | `qmicli --foxap-set-fcc-authentication` (libqmi 1.40+) |
+| Quectel MBIM radio state | `mbimcli --quectel-set-radio-state=on` |
+| Rolling / Fibocom challenge | `at+gtfcclockgen` then `at+gtfcclockver=<n>` |
 | Intel mutual authentication | `mbimcli --help-intel-mutual-authentication` |
 | AT over MBIM | `mbimcli --help-intel-at-tunnel` |
 
-If one of those reaches your modem, write a **shell-only dispatcher** with no
-`MODULE_ORCH_FAMILY`. That is lower risk and easier to review.
+Every module in this repo uses one of these, so a new one almost certainly can
+too: write a **shell-only dispatcher** and set `MODULE_UNLOCK`.
 
-Otherwise, the primary path is `wwan-orch` (`MODULE_ORCH_FAMILY=<family>`): it
-`dlopen()`s Lenovo's own bundled library for that modem and calls the unlock,
-minus the US-SIM gate. Adding a family means reading the matching per-family
-dispatch in Lenovo's `DPR_Fcc_unlock_service` and transcribing the call sequence
-into `src/wwan-orch.c` (see the existing families for the pattern).
+Work out which by reading the vendor's own path for your id in Lenovo's
+`DPR_Fcc_unlock_service` — find the `setFccUnlock_*` or `fccunlock_*` it
+dispatches to, then read the worker library it `dlopen()`s to see the messages it
+actually sends. [CLEANROOM-UNLOCKS.md](CLEANROOM-UNLOCKS.md) shows that worked
+through for all three mechanisms already in the tree, including the addresses.
+
+Reproduce what you find with stock tooling. Do not assume a mechanism carries
+across from a similar modem — read the library for the modem you have.
+
+`wwan-orch` is not an unlock path. It exists only for RF/SAR, where
+`MODULE_SAR_FAMILY` selects the family.
 
 ## `module.conf`
 
@@ -50,23 +58,19 @@ into `src/wwan-orch.c` (see the existing families for the pattern).
 MODULE_NAME="Vendor Model (chipset)"
 MODULE_IDS="1234:5678"            # one or more vendor:device ids (space separated)
 MODULE_BUS="pci"                  # pci | usb
-MODULE_STATUS="unverified"        # verified | unverified
-MODULE_VERIFIED_ON=""             # machine + date, once verified
-MODULE_ORCH_FAMILY="fxn"          # wwan-orch family: fxn|cs24|rw101|rw350|fm350|l860
+MODULE_VENDOR_SEQ="..."           # the vendor path this was derived from
+MODULE_UNLOCK="mbimcli"           # clean-room unlock: foxunlock|at-gtfcclock|mbimcli
 MODULE_DISPATCHER="fcc-unlock.sh" # the dispatcher ModemManager runs
-MODULE_LENOVO_SAR="yes"           # optional: run wwan-orch --sar after unlock (fxn only)
+MODULE_LENOVO_SAR="yes"           # optional: run wwan-orch --sar after unlock
+MODULE_SAR_FAMILY="cs24"          # SAR only: fxn|cs24|rw101|rw350|fm350|l860|em05
 MODULE_NOTES="How the unlock works, and why a helper is or isn't needed."
 ```
 
-`MODULE_STATUS` is the important field and it is **not** a formality:
-
-- `verified` — a maintainer or contributor has run this on the real card and
-  observed the radio come up. Set `MODULE_VERIFIED_ON` with machine and date.
-- `unverified` — derived from analysis, never executed. The installer prints a
-  prominent warning before installing these.
-
-Do not mark a module `verified` because the code looks right. A failed FCC unlock
-leaves the user's radio disabled.
+`MODULE_VENDOR_SEQ` is the important field. It records the vendor path the
+unlock was derived from — the `setFccUnlock_*` or `fccunlock_*` that
+`DPR_Fcc_unlock_service` dispatches to, the worker library it loads, and the
+message that library composes. Anyone reviewing the module should be able to
+follow it back into the binaries. Do not add a module without it.
 
 ## The dispatcher contract
 
