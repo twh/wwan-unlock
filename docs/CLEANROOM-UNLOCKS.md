@@ -112,6 +112,14 @@ EM05 routes here too. `setFccUnlock_em05` exists in `DPR_Fcc_unlock_service` but
 `dlopen()`s `/usr/lib/mbim2sar_em05.so`, which no Lenovo package ships, so that
 path is inert and the live EM05 FCC path is the `cs24` one.
 
+## Rolling serial AT port
+
+The `at-gtfcclock` unlock on the RW101R-GL needs the `option` driver bound, which
+kernels before 6.18 (and the stable backports) do not do for `33f8:01a8`, `01a9`,
+`0301` or `0302`. The installer writes `99-rw101r-serial.rules` for all four and
+binds immediately; the dispatcher also binds and re-checks before attempting the
+unlock, so a system without the rule still works.
+
 ## The US-SIM gate
 
 In every family the country check lives in the `DPR_Fcc_unlock_service` caller

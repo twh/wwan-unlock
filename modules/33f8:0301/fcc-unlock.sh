@@ -40,7 +40,33 @@ done
 [ -n "$AT" ] || for P in "$@"; do
   grep -q AT "/sys/class/wwan/$P/type" 2>/dev/null || echo "$P" | grep -qi AT && { AT="$P"; break; }
 done
-[ -n "$AT" ] || { log "no AT port"; exit 2; }
+
+# if the option driver has not claimed the device, ModemManager never saw a
+# ttyUSB to pass us. Bind it here and re-check: kernels before 6.18 (and the
+# stable backports) do not know 33f8:01a8/01a9/0301/0302. The bundled
+# 99-rw101r-serial.rules makes this persistent; this is the fallback for a
+# system that does not have it installed yet.
+if [ -z "$AT" ] && [ -w /sys/bus/usb-serial ]; then
+  log "no AT port from ModemManager; binding the option driver"
+  modprobe option >/dev/null 2>&1 || true
+  if [ -d /sys/bus/usb-serial/drivers/option1 ]; then
+    for PID in 01a8 01a9 0301 0302; do
+      echo "33f8 $PID" > /sys/bus/usb-serial/drivers/option1/new_id 2>/dev/null || true
+    done
+  fi
+  n=1
+  while [ "$n" -le 6 ]; do
+    for D in /dev/ttyUSB*; do
+      [ -e "$D" ] && { AT="${D#/dev/}"; break; }
+    done
+    [ -n "$AT" ] && break
+    sleep 0.2
+    n="$((n + 1))"
+  done
+  [ -n "$AT" ] && log "  bound $AT; install 99-rw101r-serial.rules to make it persistent"
+fi
+
+[ -n "$AT" ] || { log "no AT port; the option driver could not be bound"; exit 2; }
 DEVICE="/dev/$AT"
 
 at_command() {

@@ -68,8 +68,25 @@ The RW101R-GL answers its challenge on a `ttyUSB` port rather than the wwan AT
 service, so the `option` driver must have bound to the device. Linux 6.18 added
 `33f8:01a8`, `01a9`, `0301` and `0302` to that driver's id table in commit
 `523bf0a59e67`, also present in the stable backports; only `33f8:01a4` is older.
-On an earlier kernel no `/dev/ttyUSB` is created and the dispatcher exits 2. The
-installer adds `99-rw101r-serial.rules` when it finds no bound port.
+On an earlier kernel the driver never binds and no `/dev/ttyUSB` is created.
+
+Two things handle that, so no system has to be configured by hand:
+
+- The installer always writes `99-rw101r-serial.rules` to
+  `/etc/udev/rules.d/`, covering all four ids the 6.18 commit added. Each line
+  runs `modprobe option` before writing `new_id`, because
+  `/sys/bus/usb-serial/drivers/option1/` does not exist until the module is
+  loaded. The rule is a no-op on a kernel that already knows the ids, and
+  `--uninstall` removes it. The installer also binds immediately so the current
+  boot works without a replug.
+- The dispatcher checks before attempting the unlock. If ModemManager passed no
+  `ttyUSB`, it loads `option`, writes the four ids to `new_id` and waits up to
+  1.2s for a port to appear — bounded well inside ModemManager's five-second
+  dispatcher timeout. That covers a system where the rule was never installed,
+  or a card moved between machines.
+
+Neither `usbserial` nor `usb_wwan` needs loading separately: `option` selects
+`USB_SERIAL_WWAN` and links its symbols, so modprobe resolves both.
 
 ModemManager 1.24.2 has a hard-coded five-second FCC dispatcher timeout. The
 vendor's own retry sequence can exceed that, so a longer timeout may be needed.
