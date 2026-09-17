@@ -103,9 +103,14 @@ dispatcher carries; the two Dell values are scoped to the single card each one
 names — `4909b5a4` to `14c3:4d75`, `bb23be7f` to `8086:7560`. See
 [VENDOR-SEQUENCES.md](VENDOR-SEQUENCES.md).
 
-One detail taken from the vendor rather than assumed: it never matches a
-response prefix on `at+gtfcclockver`. The prefix argument is the empty string,
-and the reply is parsed with `strtoul` and compared to 1.
+One detail taken from Lenovo rather than assumed, and it is specific to
+`event_monitor_at`: that function passes an empty prefix to
+`at_send_command_singleline`, then parses the reply with `strtoul` base 16 and
+requires 1. `at_send_command_singleline` rejects a reply carrying no value line,
+returning `AT_ERROR_INVALID_RESPONSE`, so the modem has to answer with one.
+`event_monitor_at_fm350` is not the same: it sends through `send_at_of_mm`, and
+upstream's `14c3`, which has unlocked FM350s for years, matches
+`^+GTFCCLOCKVER:`.
 
 The dispatchers depart from the vendor in two places, both deliberate:
 

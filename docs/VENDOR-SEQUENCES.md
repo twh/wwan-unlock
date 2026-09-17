@@ -223,32 +223,51 @@ for it, so which case it takes has not been established.
 
 ## The vendor id hash
 
-For every AT family the hash is `sha256` of the machine's "model id in bios",
-truncated to four bytes. Three sources agree it is a property of the machine
-rather than the modem:
+For every AT family the response is keyed on four bytes: `sha256` of a "model
+id" string, truncated. Neither OEM derives that value from SMBIOS on hardware
+its own tool recognises.
 
-- `init_modemauth_srvc` does `strstr_s` against `"Dell"` and `"Lenovo"`, and only
-  the Lenovo branch reaches `KHOIHGIUCCHHII`
-- SMBIOS type 133 carries it as the first OEM string, per chapter 17.4 of
-  Fibocom's public FM350 AT command manual
-- Dell's Windows drivers carry their own: `ModemAuthenticator.exe` has
-  `DW5823EFCCLOCK`, `IntelWWANModemAuthenticator.exe` has `DW5931EFCCLOCK`, and
-  both log `Not find SMBIOS FCC Type` on the fallback path
+Lenovo's `libmodemauth.so` and `libmodemauthRW101.so.1.1` both read SMBIOS type
+133 and then throw the result away:
 
-| model id | sha256[0:4] | source | carried as a fallback by |
+```
+configure_wwan_sec_key -> get_wwan_config_id (dmidecode -t 133) -> set_dev_code
+init_modemauth_srvc    -> strstr_s(manufacturer, "Dell")
+                            found     -> devCode = dkey ("DW5823EFCCLOCK")
+                            not found -> devCode = "KHOIHGIUCCHHII"
+```
+
+`configure_wwan_sec_key` runs first, so whatever the type 133 read produced is
+overwritten before `get_dev_code` hashes it. The manufacturer string comes from
+`dmidecode -t 1 | grep 'Manufacturer'`, entry 1 of the library's `AllowedCMDS`
+table.
+
+Dell's tools invert that order. `ModemAuthenticator.exe` runs
+`DellFccLock::DellFccCheck` first, which is a PC identity registry check, a
+module HWID check and a SKU registry check. When those pass it copies its own
+constant into the model id buffer and never reads SMBIOS at all. Only when they
+fail does it call `GetSystemFirmwareTable` with the `RSMB` provider, and if that
+finds nothing it logs `Not find SMBIOS FCC Type` and carries on with the buffer
+left empty.
+
+| model id | sha256[0:4] | where it comes from | carried by |
 |---|---|---|---|
-| `KHOIHGIUCCHHII` | `3df8c719` | Lenovo firmware publishes it in SMBIOS | every AT dispatcher |
-| `DW5931EFCCLOCK` | `4909b5a4` | Dell FM350 driver | `14c3:4d75` only |
-| `DW5823EFCCLOCK` | `bb23be7f` | Dell L860-R driver | `8086:7560` only |
+| `KHOIHGIUCCHHII` | `3df8c719` | Lenovo's libraries, non-Dell branch | every AT dispatcher |
+| `DW5823EFCCLOCK` | `bb23be7f` | Dell `ModemAuthenticator.exe`, DW5823e | `8086:7560` only |
+| `DW5931EFCCLOCK` | `4909b5a4` | Dell `IntelWWANModemAuthenticator.exe`, DW5931e | `14c3:4d75` only |
 
-The two Dell values are scoped to one id each and are not interchangeable. Dell
-keys the model id to the WWAN card and names it after the card; Lenovo uses one
-id for every module it ships. `libmodemauth` pairs `8086:7560` with Dell
-subsystem `1028:5823` and `14c3:4d75` with `1028:5931`, and the driver packages
-match: `DW5823EFCCLOCK` ships in the DW5823e package, `DW5931EFCCLOCK` in the
-DW5931e one. So a Dell value belongs only in the dispatcher for the card it
-names. The Rolling dispatchers carry the Lenovo value alone -- no Dell Rolling
-id is known.
+Dell names the constant after the card and ships one per package, so a Dell
+value belongs only in the dispatcher for the card it names. Lenovo uses a single
+id for every module it ships. Chapter 17.4 of Fibocom's public FM350 AT command
+manual documents the same string as the machine's "model id in bios", with NVM
+hash `0x3d,0xf8,0xc7,0x19`.
+
+Deriving the value from SMBIOS type 133 is **our** choice, not theirs. A
+dispatcher cannot repeat Dell's registry checks, and it runs on machines neither
+tool would recognise. Where the firmware publishes the model id as the first
+string of a type 133 record, hashing it gives the right answer without guessing,
+and the constants above remain as the fallback for firmware that publishes none.
+Upstream !1491 takes the same approach for `14c3`.
 
 ## Where ours departs from the vendor
 
