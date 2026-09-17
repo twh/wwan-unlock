@@ -4,33 +4,34 @@
 # Uses no Lenovo code: the challenge/response is computed here with stock
 # sha256sum.
 #
-# The vendor drives all five ids through one code path (fccunlock_rw101), which
-# resolves only init_modemauth_srvc -- there is no MBIM variant -- and lets the
-# library locate the AT port itself, so the sequence is identical for all of them.
+# Lenovo's libmodemauthRW101.so.1.1 maps every Rolling USB pid to device type 3
+# in its `modules` table (01a8, 01a9, 0301, 0302 -> 3), and init_modemauth_srvc
+# dispatches type 3 to fcc_at_modem_unlock_101r on /dev/cdc-wdm0, which runs
+# event_monitor_at_101r. That is a different sequence from event_monitor_at,
+# which serves the 7560 R+ (device type 2).
 #
-# Vendor sequence, verified against Lenovo's worker library:
+# Vendor sequence, event_monitor_at_101r, verified against the library:
 #
-#   at+gtfcclockgen           challenge, at_send_command_singleline
-#   at+gtfcclockver=<n>       response, must reply 1
-#   at+gtfcclockmodeunlock    at_send_command
-#   at+cfun=1                 at_send_command
-#   at+gtfcclockstate         at_send_command_singleline
+#   ate0                      send_at_of_mm
+#   at+gtfcclockgen           challenge, 8 hex chars taken from offset 0x12
+#   at+gtfcclockver=0x<hex>   response, sent as a hex string
+#   at+cfun=1                 send_at_of_mm
+#   AT+GTFCCEFFSTATUS?        strtoul base 16 of the reply, non-zero = unlocked
 #
-# Every one of those is mandatory to the vendor: each failure branch logs and
-# then calls exit(1). Only a gtfcclockver value other than 1 is retried rather
-# than fatal. We depart from that in two places, both deliberate:
+# Every send failure is fatal to the vendor: LOGE then exit(1). There is no
+# at+gtfcclockmodeunlock on this path, and no at+gtfcclockstate. The vendor does
+# not check the at+gtfcclockver reply at all; the effective status read is what
+# decides.
 #
-#   at+cfun=1 is not sent. ModemManager sets the power state itself once this
-#   dispatcher returns 0.
+# We depart in one place: at+cfun=1 is not sent, because ModemManager sets the
+# power state itself once this dispatcher returns 0.
 #
-#   a failure of at+gtfcclockmodeunlock or at+gtfcclockstate is not treated as
-#   fatal. The unlock is already effected by the time gtfcclockver replies 1;
-#   those two only complete and read back the state.
-#
-# The response is compute_sha256(): sha256 over the 14-byte vendor key, then
-# sha256 over four bytes of that digest followed by four bytes of challenge,
-# sending the first four bytes of the result as a decimal. The first four bytes
-# of sha256("KHOIHGIUCCHHII") are 3df8c719, the vendor id hash below.
+# The response comes from compute_sha256_101r, which works on hex strings and
+# does no byte swapping: StrSHA256 over the model id, its first 8 hex chars
+# appended to the challenge's 8 hex chars, those 16 characters converted back to
+# 8 bytes, StrSHA256 over those, and the first 8 hex chars of the result sent as
+# text. The first four bytes of sha256("KHOIHGIUCCHHII") are 3df8c719, the
+# vendor id hash below.
 #
 # The US-SIM gate lives in the DPR_Fcc_unlock_service caller, not in this
 # sequence, so nothing is lost by not reproducing it.
@@ -132,48 +133,30 @@ for KNOWN in $KNOWN_VENDOR_ID_HASHES; do
     esac
 done
 
-# This modem hashes the challenge as a little endian u32, and reads the first
-# four bytes of the digest back as one. Lenovo's libmodemauth carries one hash
-# function per device and they differ only in that byte placement:
-#
-#   compute_sha256        MSB at the higher address -> little endian
-#                         used by 8086:7560 and, via event_monitor_at, by the
-#                         Rolling modules
-#   compute_sha256_fm350  MSB at the lower address  -> big endian
-#                         used by 14c3:4d75, which is why the upstream 14c3
-#                         script needs no swap
-#
-# So swap both ends here. ModemManager!1141 and the write-up at
-# blog.hofstede.it/replacing-lenovos-wwan-unlock-blob-with-a-100-line-bash-script
-# arrived at the same little endian handling for 8086:7560 independently.
-swap32() {
-    printf '%s' "$1" | sed 's/\(..\)\(..\)\(..\)\(..\)/\4\3\2\1/'
-}
-
 log "invoked: $DEVICE (clean-room AT challenge/response)"
+at_command 'ate0' >/dev/null
 i=1
 for VENDOR_ID_HASH in $VENDOR_ID_HASHES; do
   while [ "$i" -le 9 ]; do
       RAW="$(at_command 'at+gtfcclockgen')"
       CHALLENGE="$(echo "$RAW" | grep -o '0x[0-9a-fA-F]\+' | awk '{print $1}')"
       if [ -n "$CHALLENGE" ]; then
-          HEX="$(swap32 "$(printf '%08x' "$CHALLENGE")")"
+          HEX="$(printf '%08x' "$CHALLENGE")"
           COMBINED="$HEX$(printf '%.8s' "$VENDOR_ID_HASH")"
           HASH="$(echo "$COMBINED" | xxd -r -p | sha256sum | cut -d ' ' -f 1)"
-          RESPONSE="$(printf '%d' "0x$(swap32 "$(printf '%.8s' "$HASH")")")"
-          REPLY="$(at_command "at+gtfcclockver=$RESPONSE")"
+          at_command "at+gtfcclockver=0x$(printf '%.8s' "$HASH")" >/dev/null
 
-          # the vendor does not match a response prefix: it parses the value with
-          # strtoul and requires 1
-          RESULT="$(echo "$REPLY" | grep -o '[0-9][0-9]*' | tail -1)"
-          if [ "$RESULT" = '1' ]; then
-              log "  FCC unlock: SUCCESS"
-              at_command 'at+gtfcclockmodeunlock' >/dev/null
-              log "  FCC lock state: $(at_command 'at+gtfcclockstate')"
-              log "result rc=0"
-              exit 0
-          fi
-          log "  attempt $i: hash $VENDOR_ID_HASH refused, reply: $REPLY"
+          # the vendor ignores the gtfcclockver reply and reads the effective
+          # status instead, requiring a non-zero value
+          STATUS="$(at_command 'AT+GTFCCEFFSTATUS?')"
+          VALUE="$(echo "$STATUS" | tr -d '\r' | sed 's/.*[:=] *//')"
+          case "$VALUE" in
+              ''|0|00|0x0) ;;
+              *)  log "  FCC unlock: SUCCESS (status $STATUS)"
+                  log "result rc=0"
+                  exit 0 ;;
+          esac
+          log "  attempt $i: hash $VENDOR_ID_HASH refused, status: $STATUS"
           break
       else
           log "  attempt $i: no challenge, reply: $RAW"

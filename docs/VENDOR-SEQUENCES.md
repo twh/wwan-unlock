@@ -115,49 +115,57 @@ through `setFccUnlock_cs24` instead.
 ```
 fccunlock_rw101 -> dlopen libmodemauthRW101.so.1.1
                 -> dlsym get_country_code, init_modemauth_srvc
-   no MBIM variant is resolved, and no device path is passed
-init_modemauth_srvc -> event_monitor_at (0xcfe8)
+detect_wwan_module -> get_usb_wwan_module
+     ExecuteCustCmd[5]:  lsusb | grep 'RW101R-GL' | awk '{print $6}' | cut -d: -f2
+     sscanf "%x", looked up in the `modules` table -> wireless_module
+init_modemauth_srvc: wireless_module == 3 -> "101r unlock called. "
+                     -> fcc_at_modem_unlock_101r("/dev/cdc-wdm0")
+                     -> init_thread_monitor_101r -> event_monitor_at_101r (0xdd9e)
 ```
 
-One code path serves all five ids; the library locates the AT port itself.
+The `modules` table at `0x196c0` decides which case runs:
+
+| usb pid | wireless_module | path |
+|---|---|---|
+| `4d75` | 1 | FM350, `event_monitor_at_350` |
+| `7560` | 2 | 7560 R+, `event_monitor_at` |
+| `01a8`, `01a9`, `0301`, `0302` | 3 | RW101R-GL, `event_monitor_at_101r` |
+
+So every Rolling id takes `event_monitor_at_101r`, not `event_monitor_at`.
+`01a4` does not appear in that table.
 
 | Order | Command | Send primitive | On failure |
 |---|---|---|---|
-| 1 | `at+gtfcclockgen` | `at_send_command_singleline` | `printf` then `exit(1)` |
-| 2 | `at+gtfcclockver=%lu` | `at_send_command_singleline` | `printf` then `exit(1)` |
-| 3 | `at+gtfcclockmodeunlock` | `at_send_command` | `printf` then `exit(1)` |
-| 4 | `at+cfun=1` | `at_send_command` | `printf` then `exit(1)` |
-| 5 | `at+gtfcclockstate` | `at_send_command_singleline` | `printf` then `exit(1)` |
+| 1 | `ate0` | `send_at_of_mm` | `LOGE` then `exit(1)` |
+| 2 | `at+gtfcclockgen` | `send_at_of_mm` | `LOGE` then `exit(1)` |
+| 3 | `at+gtfcclockver=0x<hex>` | `send_at_of_mm` | `LOGE` then `exit(1)` |
+| 4 | `at+cfun=1` | `send_at_of_mm` | `LOGE` then `exit(1)` |
+| 5 | `AT+GTFCCEFFSTATUS?` | `send_at_of_mm` | `LOGE` then `exit(1)` |
 
-None of these is best effort. Every failure branch is `err < 0 ||
-resp->success == 0` and ends in `exit(1)`, which terminates
-`DPR_Fcc_unlock_service` itself. The only non-fatal outcome is a
-`at+gtfcclockver` value other than 1: `strtoul(resp->line, &end, 16)` is
-compared to 1 at `d1f9` and a mismatch jumps to `d3e8`, the `usleep(3000000)`
-loop tail, to retry. The prefix argument to `at_send_command_singleline` is the
-empty string at `0x14d20`, which is why no `+GTFCCLOCKVER:` form is required.
+There is no `at+gtfcclockmodeunlock` here and no `at+gtfcclockstate`, and the
+`at+gtfcclockver` reply is never inspected. The verdict comes from the status
+read: `strtoul(reply + 0x14, &end, 16)` at `e277`, zero means still locked and
+`exit(1)`, non-zero means unlocked and `exit(0)`. The retry tail is
+`usleep(100000)` back to the challenge.
 
-Challenge parsing: `get_dev_code`, advance past `0x`, `strtoul` base 16.
+Challenge: 8 characters copied with `strncpy` from offset `0x12` of the
+`at+gtfcclockgen` reply, which lands just past `+GTFCCLOCKGEN: 0x`.
 
-Response: `compute_sha256` at PLT 0x7000 (relocation resolved).
-
-```
-Sha256_Init -> Sha256_Update(key, 0xe) -> Sha256_Final
-Sha256_Init -> Sha256_Update(challenge, 4) -> Sha256_Update(keydigest, 4) -> Sha256_Final
-```
-
-Byte order, `compute_sha256` (0x7da3):
+Response: `compute_sha256_101r` (0x81c2). It is string based and swaps nothing:
 
 ```
-7de6: shrl $0x18 -> movb %al, -0x2d(%rbp)    MSB at the higher address
-7e0a:              movb %al, -0x30(%rbp)     LSB at the lower
+StrSHA256(model_id)                  -> hex digest
+snprintf(buf,   9, "%s", challenge)  -> challenge hex, 8 chars
+snprintf(buf+8, 9, "%s", keydigest)  -> key digest hex, 8 chars
+hex_to_bin(buf, 8)                   -> those 16 characters back to 8 bytes
+StrSHA256(bin, 8)                    -> hex digest
+snprintf(out,   9, "%s", ...)        -> first 8 hex chars, returned as text
 ```
 
-Ascending memory is LSB first: **little endian**. The response side copies
-digest[0..3] in order into the out buffer and reads it back as a native u32,
-which is also little endian.
+`event_monitor_at_101r` formats that as `0x%s` and sends `at+gtfcclockver=%s`.
 
-**Ours:** all five commands except `at+cfun=1`, with both ends byte swapped.
+**Ours:** commands 1, 2, 3 and 5, omitting `at+cfun=1`, with the same hex
+response and the same status test.
 
 ## `fm350` — Fibocom FM350-GL, `14c3:4d75`
 
@@ -216,10 +224,11 @@ fccunlock_rw350 -> dlopen libmodemauth.so.1.1 (identical to libmodemauth.so)
                 -> init_modemauth_srvc("/dev/wwan0mbim0")
 ```
 
-`init_modemauth_srvc` has exactly two device cases, 1 (FM350) and 2 (7560 R+), so
-the RW350 resolves to one of them at runtime through the device type getter. No
-`33f8` RW350 id appears in Lenovo's `fcc-unlock.d`, and this repo ships no module
-for it, so which case it takes has not been established.
+`libmodemauth.so`'s `init_modemauth_srvc` has two device cases, 1 (FM350) and 2
+(7560 R+), so the RW350 resolves to one of them at runtime through the device
+type getter. The separate `libmodemauthRW101.so.1.1` has a third case, 3, for
+the RW101R-GL. No `33f8` RW350 id appears in Lenovo's `fcc-unlock.d`, and this
+repo ships no module for it, so which case it takes has not been established.
 
 ## The vendor id hash
 

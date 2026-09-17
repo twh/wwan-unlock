@@ -40,7 +40,7 @@ dot-separated fields dropped, the apps version, the IMEI, the salt and the magic
 `FDE2`. The magic is built on the stack as `ighU` and put through
 `b_char_value()`, which is `c ? c - 0x23 : 0`.
 
-**`at-gtfcclock`** — two functions, not one. `event_monitor_at()` runs
+**`at-gtfcclock`** — three functions, not one. `event_monitor_at()` runs
 `at+gtfcclockgen`, `at+gtfcclockver=<n>` (which must reply 1), then
 `at+gtfcclockmodeunlock`, `at+cfun=1` and `at+gtfcclockstate`.
 `event_monitor_at_fm350()` runs `at+gtfcclockgen`, `at+gtfcclockver=<n>`,
@@ -51,12 +51,18 @@ Only a `gtfcclockver` value other than 1 retries. The response is
 `compute_sha256()`: `sha256( sha256(key)[0:4] ++ challenge[0:4] )[0:4]`, sent as
 a decimal. The key is 14 bytes and its digest begins `3df8c719`. Byte order is
 per device — `compute_sha256()` is little endian, `compute_sha256_fm350()` big.
+`event_monitor_at_101r()` is the third: `ate0`, `at+gtfcclockgen`,
+`at+gtfcclockver=0x<hex>`, `at+cfun=1` and `AT+GTFCCEFFSTATUS?`, with
+`compute_sha256_101r()` working on hex strings and swapping nothing, and the
+status read rather than the `gtfcclockver` reply deciding the outcome.
 See [VENDOR-SEQUENCES.md](VENDOR-SEQUENCES.md).
 
-`fccunlock_rw101` resolves only `init_modemauth_srvc` — no MBIM variant, no
-device path — so one code path serves all five Rolling ids and the library finds
-the AT port itself. `fccunlock_fm350_l860` is called with transport selector 1 at
-every call site, for the FM350-GL and the L860R+ alike, resolving
+`fccunlock_rw101` reaches `event_monitor_at_101r` for every Rolling id: the
+library's `modules` table maps usb pids `01a8`, `01a9`, `0301` and `0302` to
+device type 3, and `init_modemauth_srvc` sends type 3 to
+`fcc_at_modem_unlock_101r` on `/dev/cdc-wdm0`. `fccunlock_fm350_l860` is called
+with transport selector 1 at every call site, for the FM350-GL and the L860R+
+alike, resolving
 `init_modemauth_srvc()` on `/dev/wwan0at0`.
 
 **`mbimcli`** — `mbim_radio_state_set()` composes an MBIM SET on uuid

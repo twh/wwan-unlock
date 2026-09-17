@@ -52,18 +52,19 @@ can become `qmicli --foxap-set-fcc-authentication`.
 
 Vendor paths:
 
-- `fccunlock_rw101` → `libmodemauthRW101.so.1.1`. Resolves only
-  `init_modemauth_srvc`; there is no MBIM variant and no device path is passed,
-  so one code path serves all five Rolling ids and the library finds the AT port
-  itself.
+- `fccunlock_rw101` → `libmodemauthRW101.so.1.1`. `get_usb_wwan_module` probes
+  the USB product id with `lsusb | grep 'RW101R-GL'` and looks it up in the
+  library's `modules` table, which maps `01a8`, `01a9`, `0301` and `0302` to
+  device type 3. `init_modemauth_srvc` dispatches type 3 to
+  `fcc_at_modem_unlock_101r` on `/dev/cdc-wdm0`.
 - `fccunlock_fm350_l860` → `libmodemauth.so`. Called with transport selector 1 at
   every call site, for the FM350-GL and the L860R+ alike, which resolves
   `init_modemauth_srvc()` on `/dev/wwan0at0`. The `init_modemauth_srvc_mbim()`
   branch is resolved but never chosen.
 
-They do not all run the same sequence. There are two functions:
+They do not all run the same sequence. There are three functions:
 
-`event_monitor_at()`, reached by the Rolling modules and the L860R+:
+`event_monitor_at()`, reached by the L860R+ (device type 2):
 
 | Command | Sent via | On failure |
 |---|---|---|
@@ -82,12 +83,25 @@ They do not all run the same sequence. There are two functions:
 | `at+cfun=1` | `send_at_of_mm` | `LOGE`, `exit(1)` |
 | `AT+GTFCCEFFSTATUS?` | `send_at_of_mm` | `LOGE`, `exit(1)` |
 
-It sends no `at+gtfcclockmodeunlock`, and its status command differs. Nothing on
-either path is best effort: every failure branch ends in `exit(1)`, which
-terminates `DPR_Fcc_unlock_service` itself.
+`event_monitor_at_101r()`, reached by every Rolling id (device type 3):
 
-The challenge is located with `get_dev_code()`, advanced past the `0x` and parsed
-with `strtoul` base 16. The response comes from `compute_sha256()`:
+| Command | Sent via | On failure |
+|---|---|---|
+| `ate0` | `send_at_of_mm` | `LOGE`, `exit(1)` |
+| `at+gtfcclockgen` | `send_at_of_mm` | `LOGE`, `exit(1)` |
+| `at+gtfcclockver=0x<hex>` | `send_at_of_mm` | `LOGE`, `exit(1)` |
+| `at+cfun=1` | `send_at_of_mm` | `LOGE`, `exit(1)` |
+| `AT+GTFCCEFFSTATUS?` | `send_at_of_mm` | `LOGE`, `exit(1)` |
+
+The FM350 path sends no `at+gtfcclockmodeunlock`, and neither does the Rolling
+one; their status commands differ from `event_monitor_at`'s. The Rolling path
+never inspects the `at+gtfcclockver` reply: the status read decides, non-zero
+meaning unlocked. Nothing on any path is best effort: every failure branch ends
+in `exit(1)`, which terminates `DPR_Fcc_unlock_service` itself.
+
+On the `event_monitor_at` and `event_monitor_at_fm350` paths the challenge is
+located with `get_dev_code()`, advanced past the `0x` and parsed with `strtoul`
+base 16, and the response comes from `compute_sha256()`:
 
 ```
 Sha256_Init -> Sha256_Update(key, 0xe) -> Sha256_Final
@@ -95,6 +109,8 @@ Sha256_Init -> Sha256_Update(4) -> Sha256_Update(4) -> Sha256_Final
 ```
 
 That is `sha256( sha256(key)[0:4] ++ challenge[0:4] )[0:4]`, sent as a decimal.
+The Rolling path instead uses `compute_sha256_101r`, which does the same two
+stages on hex strings, swaps nothing, and is sent as `0x<8 hex chars>`.
 `0xe` is 14 bytes, the length of the key `KHOIHGIUCCHHII`, whose digest begins
 `3df8c719`. That value is not hard-coded: each dispatcher derives the hash from
 the machine's own SMBIOS type 133 OEM string and falls back to known values only
