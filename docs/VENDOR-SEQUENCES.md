@@ -208,13 +208,26 @@ init_modemauth_srvc: cmpl $0x2 -> "7560 R+ unlock called." -> fcc_at_modem_unloc
                                   -> event_monitor_at (0xb99b)
 ```
 
-That is the same five command sequence as `rw101`, with the same
-log-then-`exit(1)` on every failure (`ba58`, `bb54`, `bc2d`, `bca9`, `bd57`) and
-the same `usleep` retry tail at `bda0`, and `compute_sha256`, so **little
-endian**. `ApprovedHWIDS` holds `8086:7560`; `ApprovedHWIDS_FM350` holds
-`14c3:4d75`.
+Its own five commands, not `rw101`'s: `at+gtfcclockgen`,
+`at+gtfcclockver=%lu`, `at+gtfcclockmodeunlock`, `at+cfun=1`,
+`at+gtfcclockstate`, sent through the RIL `at_send_command` family rather than
+`send_at_of_mm`. Every failure logs and `exit(1)`s (`ba58`, `bb54`, `bc2d`,
+`bca9`, `bd57`); a `gtfcclockver` value other than 1 sleeps 3 seconds at `bda0`
+and restarts at the challenge. Hashing is `compute_sha256`, so **little
+endian**. `ApprovedHWIDS` holds `8086:7560` with Dell subsystems `0000:0000`,
+`1028:5823`, `1028:3a17`; `ApprovedHWIDS_FM350` holds `14c3:4d75`.
 
-**Ours:** the five commands except `at+cfun=1`, both ends swapped.
+Full trace: [traces/8086-7560-lenovo-l860r.md](traces/8086-7560-lenovo-l860r.md).
+
+This is Lenovo's sequence, and it is only one of the three OEMs shipping this
+module. Dell drives the same module over the Intel FCC lock MBIM service with
+its own model id, traced in
+[traces/8086-7560-dell-dw5823e.md](traces/8086-7560-dell-dw5823e.md), and HP
+ships no unlock at all for it,
+[traces/8086-7560-hp.md](traces/8086-7560-hp.md).
+
+**Ours:** the five commands except `at+cfun=1`, both ends swapped, on Lenovo
+machines; Dell's MBIM exchange on Dell machines; both in turn elsewhere.
 
 ## `rw350` — Rolling RW350
 

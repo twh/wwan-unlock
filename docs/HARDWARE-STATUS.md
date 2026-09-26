@@ -26,6 +26,14 @@ derivation, with addresses, is in [CLEANROOM-UNLOCKS.md](CLEANROOM-UNLOCKS.md).
 
 That is every id in Lenovo's own `fcc-unlock.d` list, plus the two EM05 variants.
 
+The table above is what Lenovo's package dispatches. A PCI id is not a Lenovo
+id, though: ModemManager and the kernel both match vendor and product only, so
+every OEM shipping the same module lands on the same unlock. For `8086:7560`
+that is Lenovo (`1cf8:*`), Dell (`1028:5823`, `1028:3a17`) and HP (`103c:8507`,
+`103c:893b`, `103c:8a53`), and Lenovo's sequence is right for only the first.
+Per OEM traces, including what Dell does differently and why HP has no sequence
+of its own, are in [traces/](traces/README.md).
+
 The US-SIM gate (`GetCountry`, `get_country_code`, `location_is_USA`) lives in
 the `DPR_Fcc_unlock_service` caller in every family, never in the message
 builder, so omitting it changes nothing about the unlock.

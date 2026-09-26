@@ -1,3 +1,4 @@
 wwan-orch
 foxunlock
 *.o
+__pycache__/
