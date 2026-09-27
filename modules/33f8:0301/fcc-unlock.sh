@@ -105,6 +105,20 @@ at_command() {
 # the string bearing record is the first one, and no machine has been observed
 # where it is not. Read from DMI sysfs rather than dmidecode, to avoid
 # executing another binary.
+# Hex string to raw bytes. xxd would do this, but it comes from vim on most
+# distributions and is not a dependency of ModemManager, and when it is missing
+# the hash is computed over an empty input, which looks exactly like a wrong
+# vendor ID hash. printf understands \0ooo octal escapes in POSIX, so no
+# external tool is needed.
+hex_to_bin() {
+    _h="$1"
+    while [ -n "$_h" ]; do
+        _b="${_h%"${_h#??}"}"
+        _h="${_h#??}"
+        printf '%b' "\\0$(printf '%o' "$((0x$_b))")"
+    done
+}
+
 dmi_oem_string() {
     entry='/sys/firmware/dmi/entries/133-0'
     len="$(cat "$entry/length" 2>/dev/null)" || return 1
@@ -143,7 +157,7 @@ for VENDOR_ID_HASH in $VENDOR_ID_HASHES; do
       if [ -n "$CHALLENGE" ]; then
           HEX="$(printf '%08x' "$CHALLENGE")"
           COMBINED="$HEX$(printf '%.8s' "$VENDOR_ID_HASH")"
-          HASH="$(echo "$COMBINED" | xxd -r -p | sha256sum | cut -d ' ' -f 1)"
+          HASH="$(hex_to_bin "$COMBINED" | sha256sum | cut -d ' ' -f 1)"
           at_command "at+gtfcclockver=0x$(printf '%.8s' "$HASH")" >/dev/null
 
           # the vendor ignores the gtfcclockver reply and reads the effective

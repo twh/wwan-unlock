@@ -264,9 +264,12 @@ install_module() {
                 info "note: mbimcli not found; install libmbim-utils before the modem powers on"
             ;;
         at-gtfcclock)
-            for _t in xxd sha256sum; do
-                command -v "$_t" >/dev/null || info "note: $_t not found; the unlock needs it"
-            done
+            # sha256sum is the only external tool these dispatchers need: the
+            # hex to binary step is done with printf, because xxd ships as part
+            # of vim on most distributions and is not installed by default.
+            command -v sha256sum >/dev/null || \
+                info "note: sha256sum not found; the unlock needs it (coreutils)"
+
             install_serial_bind_rule "$_dir"
             ;;
     esac

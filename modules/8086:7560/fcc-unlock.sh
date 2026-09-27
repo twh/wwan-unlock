@@ -102,6 +102,20 @@ at_command() {
 # copies 14 bytes from its string table, while SMBIOS::ProcWWANConfigIDType
 # matches type 0x85 length 0x2c, a structured record with no model id string.
 # So walk every entry and take the first 14 character string.
+# Hex string to raw bytes. xxd would do this, but it comes from vim on most
+# distributions and is not a dependency of ModemManager, and when it is missing
+# the hash is computed over an empty input, which looks exactly like a wrong
+# vendor ID hash. printf understands \0ooo octal escapes in POSIX, so no
+# external tool is needed.
+hex_to_bin() {
+    _h="$1"
+    while [ -n "$_h" ]; do
+        _b="${_h%"${_h#??}"}"
+        _h="${_h#??}"
+        printf '%b' "\\0$(printf '%o' "$((0x$_b))")"
+    done
+}
+
 dmi_oem_string() {
     for entry in /sys/firmware/dmi/entries/133-*; do
         [ -d "$entry" ] || continue
@@ -196,7 +210,7 @@ unlock_dell() {
             sleep 0.5; n="$((n + 1))"; continue
         fi
         COMBINED="$(swap32 "$(printf '%08x' "$CHALLENGE")")bb23be7f"
-        HASH="$(echo "$COMBINED" | xxd -r -p | sha256sum | cut -d ' ' -f 1)"
+        HASH="$(hex_to_bin "$COMBINED" | sha256sum | cut -d ' ' -f 1)"
         RESPONSE="$(printf '%u' "0x$(swap32 "$(printf '%.8s' "$HASH")")")"
         RESULT="$(mbim "--intel-set-fcc-lock=1,$RESPONSE")"
         case "$RESULT" in
@@ -221,7 +235,7 @@ unlock_lenovo() {
       if [ -n "$CHALLENGE" ]; then
           HEX="$(swap32 "$(printf '%08x' "$CHALLENGE")")"
           COMBINED="$HEX$(printf '%.8s' "$VENDOR_ID_HASH")"
-          HASH="$(echo "$COMBINED" | xxd -r -p | sha256sum | cut -d ' ' -f 1)"
+          HASH="$(hex_to_bin "$COMBINED" | sha256sum | cut -d ' ' -f 1)"
           RESPONSE="$(printf '%d' "0x$(swap32 "$(printf '%.8s' "$HASH")")")"
           REPLY="$(at_command "at+gtfcclockver=$RESPONSE")"
 
