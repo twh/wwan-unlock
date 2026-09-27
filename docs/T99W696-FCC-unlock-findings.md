@@ -104,4 +104,8 @@ package (unstripped, with symbols). Addresses are in `libfiisdk.so.2.2.2` unless
 
 Note the vendor strings say **SDX61**, not SDX62; `SDX62` appears nowhere in the
 package. The `FDE1` magic and the Dell DW5932e attribution come from SySS' write-up and
-libqmi MR !417, not from this package.
+[libqmi!417](https://gitlab.freedesktop.org/mobile-broadband/libqmi/-/merge_requests/417), which added the FOX service `0xE3`
+FCC unlock command and merged on 2025-06-03, not from this package. The FOXAP
+service `0xE4` this module needs is
+[libqmi!473](https://gitlab.freedesktop.org/mobile-broadband/libqmi/-/merge_requests/473), still open, which is why
+`foxunlock` sends the frame itself for now.

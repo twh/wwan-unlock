@@ -86,14 +86,48 @@ It must:
 2. Perform the unlock.
 3. **Exit 0 only on success.** ModemManager retries on non-zero.
 4. **Never block.** MM's fcc-unlock is synchronous and it force-kills a stuck
-   dispatcher (`forcing exit on fcc unlock operation`) then retries — a dispatcher
-   that hangs turns into a retry loop and the radio never comes up. Keep the whole
-   run well under ~8 seconds and put a hard timeout on anything that can stall.
+   dispatcher (`forcing exit on fcc unlock operation`) then retries, so one that
+   hangs turns into a retry loop and the radio never comes up. The budget is
+   `MAX_FCC_UNLOCK_EXEC_TIME_SECS`, five seconds in `src/mm-dispatcher-fcc-unlock.c`.
+   Put a bound on anything that can stall: an AT port that never answers will
+   otherwise consume the whole budget, and a second method after it never runs.
+   `timeout 2` around the read is enough, guarded by `command -v timeout`.
 5. **Log its own result.** ModemManager logs *nothing* on success, so without this
    there is no way to tell "ran and succeeded" from "never ran". Use
    `logger -t fcc-unlock-<something>`.
 
-`modules/17cb:0308/fcc-unlock.sh` is a working reference for all five.
+`modules/17cb:0308/fcc-unlock.sh` is a working reference for all five, and
+`modules/8086:7560/fcc-unlock.sh` for a module where several OEMs each need their
+own sequence.
+
+## Tools a dispatcher may rely on
+
+Only what a default install of any distribution has: shell builtins, coreutils
+(`printf`, `tr`, `head`, `tail`, `cut`, `sed`, `sleep`, `timeout`, `sha256sum`),
+`grep`, and `mbimcli` or `qmicli` where the unlock needs them.
+
+**Do not use `xxd`.** It ships as part of vim and no distribution installs it by
+default, nor does any declare it as a ModemManager dependency. When it is absent
+`xxd -r -p` produces nothing, the response is hashed over an empty input, and the
+modem refuses it, so the failure is indistinguishable from a wrong model id. Use
+the `hex_to_bin()` helper the dispatchers here carry, which is `printf` with octal
+escapes and needs nothing external.
+
+## Where the model id comes from
+
+An AT or Intel MBIM unlock hashes a 14 character "model id" published in an SMBIOS
+type 133 record. Read it from DMI sysfs rather than running `dmidecode`, walk every
+`/sys/firmware/dmi/entries/133-*` entry rather than assuming `133-0`, and take the
+first 14 character string: type 133 has two shapes and a machine can carry both in
+either order. Keep the known constants as a fallback for firmware that publishes
+none. Reasoning and the vendor evidence: [traces/smbios-type-133.md](traces/smbios-type-133.md).
+
+## Record the trace
+
+A new module is not finished until its sequence is written up in
+[traces/](traces/README.md), traced from that OEM's own binary with the address
+every step was read at, and its row added to [COVERAGE.md](COVERAGE.md). That is
+what makes the work resumable and reviewable by someone without the hardware.
 
 ## Testing before you submit
 

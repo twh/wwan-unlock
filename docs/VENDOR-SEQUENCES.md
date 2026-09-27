@@ -245,9 +245,10 @@ repo ships no module for it, so which case it takes has not been established.
 
 ## The vendor id hash
 
-For every AT family the response is keyed on four bytes: `sha256` of a "model
-id" string, truncated. Neither OEM derives that value from SMBIOS on hardware
-its own tool recognises.
+For every family the response is keyed on four bytes: `sha256` of a 14 character
+"model id" string, truncated. The id lives in an SMBIOS type 133 record; each
+OEM's tool prefers its own constant on hardware it recognises, and only falls
+back to reading SMBIOS when it does not.
 
 Lenovo's `libmodemauth.so` and `libmodemauthRW101.so.1.1` both read SMBIOS type
 133 and then throw the result away:
@@ -276,7 +277,9 @@ left empty.
 |---|---|---|---|
 | `KHOIHGIUCCHHII` | `3df8c719` | Lenovo's libraries, non-Dell branch | every AT dispatcher |
 | `DW5823EFCCLOCK` | `bb23be7f` | Dell `ModemAuthenticator.exe`, DW5823e | `8086:7560` only |
-| `DW5931EFCCLOCK` | `4909b5a4` | Dell `IntelWWANModemAuthenticator.exe`, DW5931e | `14c3:4d75` only |
+| `DW5931EFCCLOCK` | `4909b5a4` | Dell `IntelWWANModemAuthenticator.exe`, and `CDellFccLock` in HP's shared `WWANModemAuthenticator.exe` | `14c3:4d75` only |
+| `DW5933EFCCLOCK` | `93555146` | Dell `WWANModemAuthenticator.exe`, DW5933e | `14c0:4d75` only |
+| `WNCHPCEFCCLOCK` | `576f0ae0` | `CHpFccLock` in HP's `WWANModemAuthenticator.exe` | `03f0:09c8`, and a candidate for `14c3:4d75` on HP |
 
 Dell names the constant after the card and ships one per package, so a Dell
 value belongs only in the dispatcher for the card it names. Lenovo uses a single
@@ -284,19 +287,37 @@ id for every module it ships. Chapter 17.4 of Fibocom's public FM350 AT command
 manual documents the same string as the machine's "model id in bios", with NVM
 hash `0x3d,0xf8,0xc7,0x19`.
 
-Deriving the value from SMBIOS type 133 is **our** choice, not theirs. A
-dispatcher cannot repeat Dell's registry checks, and it runs on machines neither
-tool would recognise. Where the firmware publishes the model id as the first
-string of a type 133 record, hashing it gives the right answer without guessing,
-and the constants above remain as the fallback for firmware that publishes none.
-Upstream !1491 takes the same approach for `14c3`.
+Reading the id out of SMBIOS is **not** our invention, which is a correction to
+what this file said before. HP's firmware tool does exactly that, and names the
+records: in `WWANFirmwareFlash.dll`, inside `M2_7560_NAND.flz` in HP's L860R+
+SoftPaqs, the record walker matches type `0x85` with formatted **length 5** and
+hands it to `SMBIOS::ProcFCCType`, which copies **14 bytes** out of its string
+table, and matches type `0x85` with **length 0x2c** and hands it to
+`SMBIOS::ProcWWANConfigIDType`, a structured record of GUID, `WwanModelId` and
+product id that carries no string at all.
+
+So type 133 has two shapes and a machine can carry both, in either order.
+Reading `133-0` alone therefore works on some machines and silently returns
+nothing on others, which is why every dispatcher here now walks
+`/sys/firmware/dmi/entries/133-*` and takes the first 14 character string. Full
+detail in [traces/smbios-type-133.md](traces/smbios-type-133.md).
+
+What remains our choice is the order: derive from SMBIOS first, then fall back to
+the constants above, because a dispatcher cannot repeat Dell's registry checks
+and runs on machines no OEM tool would recognise.
+https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1491
+takes the same approach for `14c3`, and still reads `133-0` only.
 
 ## Where ours departs from the vendor
 
 | Departure | Applies to | Why |
 |---|---|---|
 | `at+cfun=1` omitted | all AT families | ModemManager sets the power state itself once the dispatcher returns 0. For `14c3` there is also direct evidence for that id: upstream's `14c3` script has unlocked FM350s for years without it |
-| trailing commands non-fatal | `event_monitor_at` families | the vendor `exit(1)`s if `at+gtfcclockmodeunlock` or the state read fails; the unlock is already effected once `gtfcclockver` replies 1, so ours logs and returns 0 |
+| the state read is non-fatal | `event_monitor_at` families | the vendor `exit(1)`s if the state read fails, but it reads the state after `at+cfun=1`, which we do not send, so the value is not comparable; ours logs it |
+| `at+gtfcclockmodeunlock` must answer OK | `8086:7560` upstream | matches the vendor, which `exit(1)`s on failure. The module here still treats it as non-fatal, since the unlock is already effected once `gtfcclockver` replies 1 |
 | Basic Connect radio state omitted | Quectel | same reason |
 | US-SIM gate omitted | all | it is in the dispatch function, not the message |
 | `dmidecode_query_lenovo_fcc_string` omitted | Quectel | its result is logged and never used |
+| `xxd` not used | all | it ships as part of vim and is installed by default nowhere, and when missing it hashes an empty input, which is indistinguishable from a wrong model id. `hex_to_bin()` uses `printf` octal escapes instead, so `sha256sum` is the only external tool needed |
+| every `133-*` entry is read, not `133-0` | all | type 133 has two shapes and a machine can carry both in either order; see [traces/smbios-type-133.md](traces/smbios-type-133.md) |
+| an OEM's own transport is used per machine | `8086:7560` | three OEMs ship that module and Lenovo's AT sequence is right for only one of them; the DMI system vendor selects the method, as Lenovo's own library does |

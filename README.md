@@ -27,7 +27,7 @@ and falls back to this implementation otherwise.
 | Foxconn T99W696 (SDX61) | `17cb:0308` | `foxunlock` | `setFccUnlock_fxn` → `libfiisdk` |
 | Rolling RW101R-GL | `33f8:0301/01a4/01a8/01a9/0302` | `at-gtfcclock` | `fccunlock_rw101` → `libmodemauthRW101` |
 | Fibocom FM350-GL | `14c3:4d75` | `at-gtfcclock` | `fccunlock_fm350_l860` → `libmodemauth` |
-| Fibocom L860R+ | `8086:7560` | `at-gtfcclock` | `fccunlock_fm350_l860` → `libmodemauth` |
+| Intel L860R+ | `8086:7560` | `at-gtfcclock` on Lenovo, `intel-fcc-mbim` on Dell | `fccunlock_fm350_l860` → `libmodemauth`; Dell `ModemAuthenticator.exe` |
 | Quectel EM160R-GL | `1eac:100d` | `mbimcli` | `setFccUnlock_cs24` → `libmbimtools` |
 | Quectel RM520N-GL | `1eac:1007` | `mbimcli` | `setFccUnlock_cs24` → `libmbimtools` |
 | Quectel EM061K | `2c7c:6008` | `mbimcli` | `setFccUnlock_cs24` → `libmbimtools` |
@@ -35,18 +35,37 @@ and falls back to this implementation otherwise.
 | Quectel EM05-CN | `2c7c:0310` | `mbimcli` | `setFccUnlock_cs24` → `libmbimtools` |
 
 That is every id in Lenovo's own `fcc-unlock.d` list, plus the two EM05 variants.
-Each row's unlock is the message that vendor path composes, reproduced with stock
-tooling — the derivation, down to the instruction, is in
-[docs/CLEANROOM-UNLOCKS.md](docs/CLEANROOM-UNLOCKS.md) and
-[docs/HARDWARE-STATUS.md](docs/HARDWARE-STATUS.md).
+Each row's unlock is the message that OEM's path composes, reproduced with stock
+tooling. The derivation, down to the instruction, is in
+[docs/CLEANROOM-UNLOCKS.md](docs/CLEANROOM-UNLOCKS.md), the per module traces in
+[docs/traces/](docs/traces/README.md), and what is covered against what is not in
+[docs/COVERAGE.md](docs/COVERAGE.md).
+
+A PCI id is not an OEM id. Both the kernel and ModemManager match vendor and
+product only, so every OEM shipping the same module reaches the same script, and
+a script carrying one OEM's sequence is incomplete for the rest. The L860R+ is
+the worked example: Lenovo, Dell and HP all ship it, and the dispatcher picks the
+method from the DMI system vendor.
 
 Where upstream ModemManager already ships an unlock for an id, the installer
-prefers it. These same mechanisms are being upstreamed: libqmi!473,
-ModemManager!1492 and ModemManager!1493.
+prefers it. These mechanisms are being upstreamed in
+[libqmi!473](https://gitlab.freedesktop.org/mobile-broadband/libqmi/-/merge_requests/473) and ModemManager
+[!1492](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1492),
+[!1493](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1493),
+[!1496](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1496),
+[!1499](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1499),
+[!1500](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1500) and
+[!1501](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1501); the table in
+[docs/CLEANROOM-UNLOCKS.md](docs/CLEANROOM-UNLOCKS.md) tracks their state.
 
 ## Requirements
 
-- ModemManager 1.22+ and `libmbim` (present on any modern desktop Linux)
+- ModemManager 1.22+ and `libmbim` (present on any modern desktop Linux); the
+  Intel FCC lock commands need `libmbim` 1.30 or newer
+- `sha256sum` from coreutils is the only external tool the dispatchers use.
+  `xxd` is deliberately not used: it ships as part of vim, is installed by
+  default nowhere, and when missing it would hash an empty input and look
+  exactly like a wrong model id
 - `build-essential`, `pkgconf`, `libmbim-glib-dev`, `libqmi-glib-dev` (for the helper)
 
 ```sh
@@ -116,17 +135,21 @@ Skip it with `--no-sar` (unlock only); re-apply it alone with `--sar-only`.
 
 ## How it works
 
-**Every unlock is clean-room.** For each modem, Lenovo's own code path was read
-out of `DPR_Fcc_unlock_service` and the worker library it loads, and the messages
-it sends are reproduced here with stock tooling. No Lenovo code runs during an
-unlock. Three mechanisms cover all ten modules:
+**Every unlock is clean-room.** For each modem, that OEM's own code path was read,
+usually Lenovo's `DPR_Fcc_unlock_service` and the worker library it loads, and for
+modules Dell or HP sell with a different sequence, their Windows tools as well.
+The messages are then reproduced here with stock tooling, and no OEM code runs
+during an unlock. Four mechanisms cover the modules here:
 
 - **`foxunlock`** — Foxconn T99W696. Computes the auth hash and sends the
   QMI-over-MBIM message itself (service `0xE4`, msg `0x5571`). Built and
   installed by the installer.
-- **`at-gtfcclock`** — Rolling RW101R-GL, Fibocom FM350-GL and L860R+. The
-  `at+gtfcclockgen` / `at+gtfcclockver` challenge/response, computed in the
-  dispatcher with stock `sha256sum`.
+- **`at-gtfcclock`** — Rolling RW101R-GL, Fibocom FM350-GL, and the L860R+ on a
+  Lenovo machine. The `at+gtfcclockgen` / `at+gtfcclockver` challenge/response,
+  computed in the dispatcher with stock `sha256sum`.
+- **`intel-fcc-mbim`** — the L860R+ on a Dell machine. CID 1 of the Intel Mutual
+  Authentication service over `mbimcli`: query, a set that asks for the challenge,
+  then a set carrying the response.
 - **`mbimcli`** — every Quectel. `mbimcli --quectel-set-radio-state=on`, which is
   the Quectel-service MBIM command the vendor library sends.
 

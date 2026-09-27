@@ -38,7 +38,7 @@ The US-SIM gate (`GetCountry`, `get_country_code`, `location_is_USA`) lives in
 the `DPR_Fcc_unlock_service` caller in every family, never in the message
 builder, so omitting it changes nothing about the unlock.
 
-## Three mechanisms
+## Four mechanisms
 
 **`foxunlock`** — `Fox_Attempt()` -> `FoxApSetFccLockStatus()` ->
 `QMIFOXAPSetFccLockStatus()`, which composes service byte `0xE4` and message id
@@ -64,6 +64,18 @@ per device — `compute_sha256()` is little endian, `compute_sha256_fm350()` big
 `compute_sha256_101r()` working on hex strings and swapping nothing, and the
 status read rather than the `gtfcclockver` reply deciding the outcome.
 See [VENDOR-SEQUENCES.md](VENDOR-SEQUENCES.md).
+
+**`intel-fcc-mbim`** — CID 1 of the Intel Mutual Authentication service,
+`f85d46ef-ab26-4081-9868-4d183c0a3aec`, which `mbimcli` exposes as
+`--intel-query-fcc-lock` and `--intel-set-fcc-lock`. Dell and HP drive several
+modules this way instead of over AT. The exchange is: query, then a set carrying
+`ResponsePresent = 0` whose reply holds the challenge, then a set carrying
+`ResponsePresent = 1` with the first four bytes of
+`sha256(challenge ‖ sha256(model id)[0:4])`. That split is confirmed from two
+unrelated sources, Dell's `DoFccUnlock` and the `ril_request_INTEL_FCC_LOCK_Set`
+branch in HP's `WinIhvRil.dll`. Used for the L860R+ on a Dell machine, and it is
+what `14c0:4d75` and `03f0:09c8` need upstream. See
+[traces/](traces/README.md).
 
 `fccunlock_rw101` reaches `event_monitor_at_101r` for every Rolling id: the
 library's `modules` table maps usb pids `01a8`, `01a9`, `0301` and `0302` to
@@ -210,10 +222,13 @@ disassembly review:
 
 ## Notes
 
-- **The unlocks** are derived from the vendor SDK, not reimplemented from guesswork:
-  each message is the one Lenovo's own library composes for that modem, read out of
-  the disassembly and reproduced with stock tooling. A failed FCC unlock is not
-  destructive — it leaves the radio disabled, recoverable by `--uninstall`.
+- **The unlocks** are derived from the OEM's own software, not reimplemented from
+  guesswork: each message is the one that OEM's tool composes for that modem, read
+  out of the disassembly and reproduced with stock tooling. For most modules that
+  is Lenovo's library; where Dell or HP ships the same module with a different
+  sequence, their Windows tools were read as well, and the per module traces record
+  which binary each step came from. A failed FCC unlock is not destructive: it
+  leaves the radio disabled, recoverable by `--uninstall`.
 - **SAR** is different: it still calls Lenovo's libraries through `wwan-orch`, and
   the per-family notes above mark which of those paths have been exercised.
 - **EM05 (`mbim2sar_em05.so`)**: for **FCC**, `DPR_Fcc_unlock_service`'s
@@ -222,8 +237,10 @@ disassembly review:
   `setFccUnlock_cs24` (`libmbimtools.so`), so `--family em05` correctly routes to the
   `cs24` FCC path and `mbim2sar_em05.so` is never loaded for FCC. It **is** loaded
   for EM05 **SAR** — see below.
-- **`foxunlock`** is a separate, fully clean-room FCC unlock for the T99W696 that
-  uses no Lenovo code at runtime. It is **not** part of the installer or any module
-  — build it standalone with `make foxunlock`. See T99W696-FCC-unlock-findings.md.
+- **`foxunlock`** is a fully clean-room FCC unlock for the T99W696 that uses no
+  Lenovo code at runtime. `install.sh` builds it from `src/foxunlock.c` and installs
+  it into `$LIBDIR` when the detected module's mechanism is `foxunlock`; it can also
+  be built standalone with `make foxunlock`. See
+  [T99W696-FCC-unlock-findings.md](T99W696-FCC-unlock-findings.md).
 - Many cards are also handled directly by upstream ModemManager; the installer
   prefers an upstream fcc-unlock script when one exists for the detected id.

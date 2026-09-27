@@ -1,10 +1,14 @@
 # Clean-room FCC unlocks
 
-Every FCC unlock in `modules/` is clean-room: it contains no Lenovo code and
-loads none of the bundled libraries at runtime. Each was derived by reading the
-vendor's own code path for that specific modem in Lenovo's `lenovo-wwan-unlock`
-package — `DPR_Fcc_unlock_service` and the worker library it `dlopen()`s — and
-reproducing the messages it sends with stock tooling.
+Every FCC unlock in `modules/` is clean-room: it contains no OEM code and loads
+none of the bundled libraries at runtime. Each was derived by reading that OEM's
+own code path for that specific modem and reproducing the messages it sends with
+stock tooling. For most modules that path is in Lenovo's `lenovo-wwan-unlock`
+package, `DPR_Fcc_unlock_service` and the worker library it `dlopen()`s. Where a
+module is also sold by Dell or HP with a different sequence, that OEM's own
+Windows tool was read too; per module traces, with addresses, are in
+[traces/](traces/README.md) and the state of every module is in
+[COVERAGE.md](COVERAGE.md).
 
 Lenovo's bundled libraries remain in `vendor/lenovo/`, and `wwan-orch` remains
 in the tree, **only for SAR**. No unlock uses either.
@@ -14,8 +18,13 @@ in the tree, **only for SAR**. No unlock uses either.
 | Mechanism | Modules | Tool |
 |---|---|---|
 | `foxunlock` | Foxconn T99W696 | our own QMI-over-MBIM sender |
-| `at-gtfcclock` | Rolling RW101R-GL, Fibocom FM350-GL, Fibocom L860R+ | the dispatcher, with `sha256sum` |
-| `mbimcli` | Quectel EM160R-GL, EM061K, RM520N-GL, EM05-G, EM05-CN | stock `mbimcli` |
+| `at-gtfcclock` | Rolling RW101R-GL, Fibocom FM350-GL, Intel L860R+ on Lenovo machines | the dispatcher, with `sha256sum` |
+| `intel-fcc-mbim` | Intel L860R+ on Dell machines | stock `mbimcli`, Intel Mutual Authentication service, CID 1 |
+| `mbimcli` | Quectel EM160R-GL, EM061K, RM520N-GL, EM05-G, EM05-CN | stock `mbimcli`, Quectel radio state |
+
+The L860R+ needs two of those in one dispatcher, because three OEMs ship that
+module and Lenovo's AT sequence is right for only one of them. The DMI system
+vendor picks the method, which is what Lenovo's own library does.
 
 ## `foxunlock` — Foxconn T99W696, `17cb:0308`
 
@@ -45,7 +54,7 @@ stack at `0xb83a`–`0xb84f` and each is passed through `b_char_value()`
 from FOX (`0xE3`) msg `0x555E`; the IMEI from DMS (`0x02`).
 
 `foxunlock` is used rather than `qmicli` because libqmi does not know service
-`0xE4` yet — that is mobile-broadband/libqmi!473. Once it ships, the dispatcher
+`0xE4` yet — that is [libqmi!473](https://gitlab.freedesktop.org/mobile-broadband/libqmi/-/merge_requests/473). Once it ships, the dispatcher
 can become `qmicli --foxap-set-fcc-authentication`.
 
 ## `at-gtfcclock` — Rolling and Fibocom
@@ -111,13 +120,19 @@ Sha256_Init -> Sha256_Update(4) -> Sha256_Update(4) -> Sha256_Final
 That is `sha256( sha256(key)[0:4] ++ challenge[0:4] )[0:4]`, sent as a decimal.
 The Rolling path instead uses `compute_sha256_101r`, which does the same two
 stages on hex strings, swaps nothing, and is sent as `0x<8 hex chars>`.
-`0xe` is 14 bytes, the length of the key `KHOIHGIUCCHHII`, whose digest begins
-`3df8c719`. That value is not hard-coded: each dispatcher derives the hash from
-the machine's own SMBIOS type 133 OEM string and falls back to known values only
-when the firmware publishes none. The Lenovo `3df8c719` is the fallback every AT
-dispatcher carries; the two Dell values are scoped to the single card each one
-names — `4909b5a4` to `14c3:4d75`, `bb23be7f` to `8086:7560`. See
-[VENDOR-SEQUENCES.md](VENDOR-SEQUENCES.md).
+`0xe` is 14 bytes, the length of every model id: `KHOIHGIUCCHHII`, whose digest
+begins `3df8c719`. That value is not hard-coded. Each dispatcher derives the hash
+from the machine's own SMBIOS type 133 string, walking every
+`/sys/firmware/dmi/entries/133-*` entry and taking the first 14 character string,
+and falls back to known values only when the firmware publishes none. Reading the
+id from SMBIOS is the OEMs' own mechanism, not ours: HP's firmware tool names the
+record `FCC type` and copies 14 bytes out of it, in
+[traces/smbios-type-133.md](traces/smbios-type-133.md).
+
+The Lenovo `3df8c719` is the fallback every AT dispatcher carries. Each other id
+is scoped to the cards its own tool serves: `bb23be7f` to `8086:7560`,
+`4909b5a4` to `14c3:4d75`, `93555146` to `14c0:4d75`, `576f0ae0` to `03f0:09c8`.
+See [VENDOR-SEQUENCES.md](VENDOR-SEQUENCES.md).
 
 One detail taken from Lenovo rather than assumed, and it is specific to
 `event_monitor_at`: that function passes an empty prefix to
@@ -173,10 +188,18 @@ builder. Omitting it changes nothing about the unlock itself.
 
 ## Upstream
 
-These same mechanisms are being submitted to ModemManager and libqmi:
+These same mechanisms are being submitted to ModemManager and libqmi. State as
+of 2026-09-26:
 
-- mobile-broadband/libqmi!473 — FOXAP service `0xE4`
-- mobile-broadband/ModemManager!1492 — `17cb:0308`
-- mobile-broadband/ModemManager!1493 — Rolling, L860R+, EM160R-GL, EM061K
+| Merge request | Covers | State |
+|---|---|---|
+| [libqmi!473](https://gitlab.freedesktop.org/mobile-broadband/libqmi/-/merge_requests/473) | FOXAP service `0xE4` | open |
+| [[!1492](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1492) | `17cb:0308` Foxconn T99W696 | open |
+| [[!1493](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1493) | Rolling `33f8`, EM160R-GL, EM061K | open |
+| [[!1496](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1496) | `8086:7560`, Lenovo and Dell methods | open, supersedes [!1141](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1141) |
+| [[!1499](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1499) | `14c0:4d75` Dell DW5933e | open, confirmed on hardware |
+| [[!1500](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1500) | `105b:e0f5`, `105b:e0f9` Dell DW5932e | draft |
+| [[!1501](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1501) | `03f0:09c8` HP DRMR-H01 | draft, untested hardware |
+| [[!1491](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1491) | Andreas Haerter's `14c3` SMBIOS derivation | open, not ours |
 
 Where upstream ships an unlock for an id, the installer prefers it.
