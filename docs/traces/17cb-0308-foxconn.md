@@ -95,15 +95,20 @@ This is the discriminator the script needs: on `17cb:0308`, subsystem
 Both modules hash the same four inputs in the same order; only the magic and
 the service differ.
 
-### The two readings of the T99W373 version should agree
+### The two readings of the T99W373 version produce the same hash
 
-Issue 1100 gives a real DW5932e revision: `FDE.F0.3.0.1.1.DT.005.074`, nine
-fields. Dell's reading gives `FDE.F0.3.0.1.1` + `074`. SySS's gives mcfg minus
-two fields + apps, which is the same string if the FOX mcfg version is
-`FDE.F0.3.0.1.1.DT.005` and the apps version is `074`, i.e. if the DMS revision
-is the mcfg version with the apps version appended. That fits the T99W696
-example mcfg `FDE.F0.3.2.0.3.AT.002`. **Not yet confirmed** against the FOX
-outputs of one module.
+Confirmed by disassembling Dell's `SIMService.exe`, in
+[105b-dw5932e-dell.md](105b-dw5932e-dell.md). Issue 1100 gives a real DW5932e
+revision: `FDE.F0.3.0.1.1.DT.005.074`, nine fields. Dell's reading gives
+`FDE.F0.3.0.1.1` + `074` as one string; the SySS reading this script uses gives
+mcfg minus two fields + apps as two strings. They concatenate to the same md5
+input, so the two paths compute the same response.
+
+One caveat: Dell forces the suffix to three digits with `%03d`, while the FOX
+apps query here uses whatever the modem returns. They agree only while the apps
+version is already three digits, which it is in every sample seen (`074`, `068`).
+A module reporting a two-digit apps version would hash differently here than
+Dell does; reading the DMS revision, as `105b:e0f5` does, avoids the question.
 
 ## FOXAP does not identify the module
 
@@ -151,6 +156,46 @@ issues exactly the same `qmicli` calls as before. Checked against a simulated
 modem whose `qmicli` stub accepts only an independently computed hash: 40 of
 40 under `sh`, `dash`, `bash` and `ksh`. Dan's FOX and `FDE1` path is credited
 with `Suggested-by:`.
+
+## What the fii_linux repository shows
+
+Read 2026-10-25 through the GitHub API: history, issues and every text file.
+`FoxFlss` itself ships only as a compiled binary and was not disassembled.
+
+- **Publisher.** All nine commits (2025-08-08 to 2026-10-12, v1.0.11 to
+  v1.0.17; the history was re-initialised on 2025-08-08) are by Slark Xiao
+  `<slark_xiao@163.com>`, who also wrote the kernel's MHI support for
+  Foxconn: "Add support for Foxconn T99W373 and T99W368" (13b9b814da2d),
+  "Add support for Dell DW5932e" (104a8c5dd943), "Add Foxconn T99W696 modem"
+  (0d63055e1406) and "Add support for all Foxconn T99W696 SKU variants"
+  (376358bb9770). Answering issues as `SlarkXiao`, he calls it a project
+  "responsible to DELL only" and sends people wanting bare modules to
+  "Foxconn Sales". So this is Foxconn's Linux tool for the modules it
+  supplies to Dell, which SySS had left open.
+- **Dell platform gate.** `FoxFlss` unlocks only on Dell system SKUs it
+  lists, read from DMI `product_sku` (issue #2 lists `0CB2` to `0D60`), and
+  logs `Current platform:0CBE do not support FccLock!` otherwise. It also
+  writes a per platform RF tuner table, which is why its maintainer warns
+  against faking the SKU. The FCC unlock does not depend on that table: with a
+  listed SKU and no RF match it logs `Unlock Fcc Success!` and then
+  `There is no matched System SKU`. Our dispatcher writes no RF data.
+- **Qualcomm ids are the unconfigured state.** For a DW5934e showing
+  `17cb:0309`, he says `[105b:e11d] shall be the expected VID/PID settings`
+  (issue #3), the SDX72 counterpart of Dan's T99W373 on `17cb:0308`.
+- **The version string.** `FoxFlss` logs `Device Get Software Version:
+  FDE.F0.3.0.1.1` then `Device is DW5932e` (issue #2). On that same unit
+  ModemManager shows the firmware revision as `FDE.F0.3.0.1.1.SC.003` and
+  `068` on two lines, so the module reports the mcfg version and a three
+  digit apps version separately. Issue 1100's `FDE.F0.3.0.1.1.DT.005.074` is
+  the same two joined with a dot. Both readings of the T99W373 version
+  therefore give `FDE.F0.3.0.1.1` plus the three digits.
+- **T99W696 subsystems.** Before the wildcard, Foxconn's kernel patch listed
+  `105b:e142` (T99W696.01, Lenovo generic), `e143` (.02, X1 Carbon), `e144`
+  (.03, X1 2-in-1), `e145` (.04, PRC) and `e146` (.00, Foxconn). None
+  collides with Dell's `e0f5` or `e0f9`.
+- **FOXAP.** The release notes never mention a service change. The DW5932e
+  unlock dates from 1.0.0, the DW5934e one from 1.0.4. The forum report that
+  newer `FoxFlss` uses FOXAP for the DW5932e remains unconfirmed here.
 
 ## Open questions
 

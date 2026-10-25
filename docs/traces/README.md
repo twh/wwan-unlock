@@ -21,6 +21,8 @@ including the ones that turned out to carry no unlock at all.
 | `8086:7560` | HP variants | HP packages: none ships an unlock | [8086-7560-hp.md](8086-7560-hp.md) |
 | `03f0:09c8`, and `14c3:4d75` on Dell and HP | HP DRMR-H01 / WNC M80 | HP `WWANModemAuthenticator.exe` | [hp-wwanmodemauthenticator.md](hp-wwanmodemauthenticator.md) |
 | `17cb:0308` | Qualcomm SDX6x id: T99W696, and a T99W373 with its customer id cleared | Lenovo `libfiisdk.so.2.2.2`, Dell `SIMService.exe`, SySS, Foxconn `fii_linux` | [17cb-0308-foxconn.md](17cb-0308-foxconn.md) |
+| `105b:e0f5`, `105b:e0f9` | Dell DW5932e (Foxconn T99W373) | Dell `SIMService.exe` | [105b-dw5932e-dell.md](105b-dw5932e-dell.md) |
+| `105b:e0f5`/`e0f9`, `105b:e11d`/`e11e` | Foxconn DW5932e and DW5934e | Foxconn `FoxFlss` (`fii_linux`) | [foxflss-fii-linux.md](foxflss-fii-linux.md) |
 
 `8086:7560` is complete: all three OEMs that ship the module are accounted for,
 and the dispatcher covers Lenovo and Dell with their own sequences.
