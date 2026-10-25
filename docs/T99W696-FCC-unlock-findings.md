@@ -107,5 +107,9 @@ package. The `FDE1` magic and the Dell DW5932e attribution come from SySS' write
 [libqmi!417](https://gitlab.freedesktop.org/mobile-broadband/libqmi/-/merge_requests/417), which added the FOX service `0xE3`
 FCC unlock command and merged on 2025-06-03, not from this package. The FOXAP
 service `0xE4` this module needs is
-[libqmi!473](https://gitlab.freedesktop.org/mobile-broadband/libqmi/-/merge_requests/473), still open, which is why
-`foxunlock` sends the frame itself for now.
+[libqmi!473](https://gitlab.freedesktop.org/mobile-broadband/libqmi/-/merge_requests/473), merged on 2026-09-29 and first
+released in libqmi 1.40. The latest release is 1.38.0, so `foxunlock` still sends
+the frame itself until distributions carry 1.40.
+
+`17cb:0308` is Qualcomm's SDX6x id, not Foxconn's, so other modules reach the same
+dispatcher; see [traces/17cb-0308-foxconn.md](traces/17cb-0308-foxconn.md).

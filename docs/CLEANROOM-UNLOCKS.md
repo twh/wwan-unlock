@@ -189,11 +189,11 @@ builder. Omitting it changes nothing about the unlock itself.
 ## Upstream
 
 These same mechanisms are being submitted to ModemManager and libqmi. State as
-of 2026-09-26:
+of 2026-10-25:
 
 | Merge request | Covers | State |
 |---|---|---|
-| [libqmi!473](https://gitlab.freedesktop.org/mobile-broadband/libqmi/-/merge_requests/473) | FOXAP service `0xE4` | open |
+| [libqmi!473](https://gitlab.freedesktop.org/mobile-broadband/libqmi/-/merge_requests/473) | FOXAP service `0xE4` | merged 2026-09-29, first in libqmi 1.40 |
 | [[!1492](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1492) | `17cb:0308` Foxconn T99W696 | open |
 | [[!1493](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1493) | Rolling `33f8`, EM160R-GL, EM061K | open |
 | [[!1496](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1496) | `8086:7560`, Lenovo and Dell methods | open, supersedes [!1141](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1141) |
