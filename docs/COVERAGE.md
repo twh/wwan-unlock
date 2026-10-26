@@ -19,8 +19,9 @@ the rest.
 | `14c0:4d75` | Dell DW5933e | Dell `1028:5933`/`5966` | Dell `WWANModemAuthenticator.exe` | [!1499](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1499), hardware confirmed | **missing** |
 | `03f0:09c8` | HP DRMR-H01 (WNC M80) | HP `103c:8e6d`/`8e6f` | HP `WWANModemAuthenticator.exe`, `CHpFccLock` -> `WNCHPCEFCCLOCK` = `576f0ae0` | [!1501](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1501) (draft) | **missing** |
 | `8086:7360` | Intel XMM7360 | Lenovo, HP `103c:8337` | XMM RPC; HP ships no unlock | in tree | **missing** |
-| `17cb:0308` | Foxconn T99W696 (SDX61); also any Foxconn SDX6x with its customer id cleared, e.g. a T99W373, plus Telit FN990/FE990A and Sierra EM929x, since this is Qualcomm's own id ([trace](traces/17cb-0308-foxconn.md)) | Lenovo | Lenovo `libfiisdk.so.2.2.2`; T99W373 per Dell `SIMService.exe` and SySS | [!1492](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1492) | `modules/17cb:0308` |
-| `105b:e0f5`, `105b:e0f9` | Dell DW5932e | Dell | Foxconn magic string over QMI | [!1500](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1500) (draft) | **missing** |
+| `17cb:0308` | Foxconn T99W696 (SDX61); also any Foxconn SDX6x with its customer id cleared, e.g. a T99W373, plus Telit FN990/FE990A and Sierra EM929x, since this is Qualcomm's own id ([trace](traces/17cb-0308-foxconn.md)) | Lenovo | Lenovo `libfiisdk.so.2.2.2`; T99W373 per Dell `SIMService.exe`, Foxconn `FoxFlss` and SySS | [!1492](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1492) | `modules/17cb:0308` |
+| `105b:e0f5`, `105b:e0f9` | Dell DW5932e (Foxconn T99W373) | Dell, Foxconn | `FDE1` over FOX (`0xE3`), md5 of version + IMEI + salt + magic. Dell `SIMService.exe` reads the DMS revision ([trace](traces/105b-dw5932e-dell.md)); Foxconn `FoxFlss` reads the FOX firmware version ([trace](traces/foxflss-fii-linux.md)); both confirmed from the binaries | [!1500](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1500) (draft) | **missing** |
+| `105b:e11d`, `105b:e11e` | Dell DW5934e (Snapdragon X72) | Dell, Foxconn | `FDE2` over FOXAP (`0xE4`), same md5 scheme. Foxconn `FoxFlss` gates it on firmware apps version `>= AP047` ([trace](traces/foxflss-fii-linux.md)) | none | **missing**; FOXAP needs libqmi 1.40 |
 | `105b:e0ab`, `105b:e0c3`, `05c6:90d5` | Foxconn T77W968 and kin | several | upstream contributors | in tree | not needed here |
 | `33f8:01a4/01a8/01a9/0301/0302` | Rolling RW101R-GL | Lenovo | Lenovo `libmodemauthRW101.so.1.1` `event_monitor_at_101r` | [!1493](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1493) | `modules/33f8:01a4`, `33f8:0301` |
 | `1eac:1007`, `1eac:100d`, `2c7c:6008` | Quectel RM520N-GL, EM160R-GL, EM061K | Lenovo | Lenovo `libmbimtools.so` `setFccUnlock_cs24` | `1eac:1007` and `2c7c` in tree; `1eac:100d`, `2c7c:6008` in [!1493](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1493) | `modules/1eac:1007`, `1eac:100d`, `2c7c:6008` |
@@ -35,6 +36,12 @@ Ordered by how much is already known, so the cheapest first:
 1. **`14c0:4d75` Dell DW5933e.** Fully traced and confirmed on hardware by a
    reporter, shipping as [!1499](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1499). Porting it here is a transcription job.
 2. **`105b:e0f5`, `105b:e0f9` Dell DW5932e.** Traced, shipping as [!1500](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1500).
+   Confirmed from two binaries: Dell's `SIMService.exe` and Foxconn's own
+   `FoxFlss`, in [traces/105b-dw5932e-dell.md](traces/105b-dw5932e-dell.md) and
+   [traces/foxflss-fii-linux.md](traces/foxflss-fii-linux.md). The two read the
+   firmware version differently but hash the same bytes. The sibling
+   **`105b:e11d`/`e11e` DW5934e** uses FOXAP with `FDE2` and needs libqmi 1.40,
+   so it waits on a release rather than a trace.
 3. **`03f0:09c8` HP DRMR-H01.** Traced, shipping as [!1501](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/merge_requests/1501). HP's
    `WWANModemAuthenticator.exe` is the source, model id `WNCHPCEFCCLOCK`.
 4. **`8086:7360` Intel XMM7360.** Upstream has a script; this repo has no
@@ -53,9 +60,17 @@ Ordered by how much is already known, so the cheapest first:
   machine and module into a worker library and does everything over AT, except
   the Quectel modules which go over MBIM. Traced in
   [VENDOR-SEQUENCES.md](VENDOR-SEQUENCES.md) and [traces/](traces/README.md).
-- **Dell** ships one small authenticator executable per module package, each
-  carrying a model id named after the card, and drives the Intel FCC lock MBIM
-  service.
+- **Dell** ships one small authenticator executable per module package. For its
+  Intel modules each carries a model id named after the card and drives the
+  Intel FCC lock MBIM service. For its Foxconn modules (`SIMService.exe`, DW5932e)
+  it instead uses the Foxconn FOX QMI service with the `FDE1` magic, in
+  [traces/105b-dw5932e-dell.md](traces/105b-dw5932e-dell.md).
+- **Foxconn** ships `FoxFlss` in its `fii_linux` package for the Dell DW5932e and
+  DW5934e: FOX (`0xE3`, `FDE1`) for the DW5932e and FOXAP (`0xE4`, `FDE2`) for the
+  DW5934e, both gated on a Dell platform SKU, in
+  [traces/foxflss-fii-linux.md](traces/foxflss-fii-linux.md). Its magic uses the
+  same `c - 0x23` obfuscation as Lenovo's `libfiisdk`, so the two share a
+  lineage.
 - **HP** ships an unlock only for some modules. Where it does, it is the same
   shared `WWANModemAuthenticator.exe` Dell's packages use, installed as a
   service by the network adapter INF, with an `CHpFccLock` class alongside
