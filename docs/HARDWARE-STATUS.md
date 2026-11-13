@@ -17,7 +17,7 @@ derivation, with addresses, is in [CLEANROOM-UNLOCKS.md](CLEANROOM-UNLOCKS.md).
 | `33f8:0301` | Rolling RW101R-GL | `fccunlock_rw101` | `libmodemauthRW101.so.1.1` | `at-gtfcclock` |
 | `33f8:01a4/01a8/01a9/0302` | Rolling RW101R-GL | `fccunlock_rw101` | `libmodemauthRW101.so.1.1` | `at-gtfcclock` |
 | `14c3:4d75` | Fibocom FM350-GL | `fccunlock_fm350_l860` | `libmodemauth.so` | `at-gtfcclock` |
-| `8086:7560` | Fibocom L860R+ | `fccunlock_fm350_l860` | `libmodemauth.so` | `at-gtfcclock` |
+| `8086:7560` | Fibocom L860R+ | `fccunlock_fm350_l860` | `libmodemauth.so` | `intel-fcc-mbim` then `at-gtfcclock` |
 | `1eac:100d` | Quectel EM160R-GL | `setFccUnlock_cs24` | `libmbimtools.so` | `mbimcli` |
 | `1eac:1007` | Quectel RM520N-GL | `setFccUnlock_cs24` | `libmbimtools.so` | `mbimcli` |
 | `2c7c:6008` | Quectel EM061K | `setFccUnlock_cs24` | `libmbimtools.so` | `mbimcli` |
@@ -94,6 +94,58 @@ which only powers the radio up, and ModemManager does that itself.
 
 EM05 routes here too: `setFccUnlock_em05` `dlopen()`s `/usr/lib/mbim2sar_em05.so`,
 which no Lenovo package ships, so that path is inert.
+
+## L860R+ on a Lenovo: the MBIM side lock
+
+Observed on a ThinkPad X13 Gen 3, L860R+ firmware `18601.5001.00.01.01.32_GC`,
+ModemManager 1.24.0, libmbim 1.32.0, on 2026-11-13.
+
+With only the AT unlock, the modem never enabled. Each attempt went the same way:
+
+1. ModemManager sets MBIM radio state on, and the modem answers `Busy`.
+2. ModemManager runs the dispatcher, `at+gtfcclockver` replies `1` and
+   `at+gtfcclockstate` reads `1`.
+3. ModemManager retries the radio set, gets `Busy` again, and fails with
+   `Invalid transition`.
+
+`mbimcli --intel-query-fcc-lock` still reported `locked` with state `0` after
+a successful AT unlock, and `--set-radio-state=on` stayed `Busy` after 10 s.
+`AT+CFUN=1` did power the radio, which is why Lenovo's own sequence, ending in
+`at+cfun=1`, works, but ModemManager powers the radio over MBIM.
+
+Running the `intel-fcc-mbim` exchange keyed with Lenovo's `3df8c719` (not
+Dell's `bb23be7f`) cleared it: the query then read state `1`, and the MBIM
+radio set succeeded. So on a Lenovo the dispatcher runs both, `intel-fcc-mbim`
+with the machine's own hash first and `at-gtfcclock` second, and the MBIM
+result decides success.
+
+The order matters. The first version ran AT then MBIM, and on a reboot that
+wedged the modem: after `gtfcclockver` replied `1`, `gtfcclockmodeunlock` and
+`gtfcclockstate` both timed out, the MBIM exchange still reported unlocked,
+ModemManager's radio set then timed out, and the firmware crashed (iosm
+`PORT open refused, phase A-CD_READY`) until the next reboot. The one boot that
+had registered and connected took the other order by accident. Its AT challenge
+went unanswered, so MBIM unlocked alone, and ModemManager then reported the
+software radio switch OFF. On its retry the AT unlock succeeded, MBIM found the
+state already set, and the radio came up.
+
+With MBIM first, a reboot connected unaided. Right after the MBIM unlock the
+modem left `at+gtfcclockgen` unanswered twice; ModemManager re-ran the
+dispatcher every two seconds, and the third run, about eight seconds after the
+MBIM unlock, got a challenge and the AT unlock succeeded. The modem then
+registered and connected on LTE. So far that is one reboot that failed with the
+old order and two that connected with this one.
+
+Two side effects of the failure loop, worth knowing when debugging one:
+
+- The modem can be left at `+COPS: 2` (deregistered), so even once the radio is
+  on it does not search. `AT+COPS=0` restores automatic selection.
+- NetworkManager's autoconnect keeps restarting the enable, so stop it
+  (`nmcli device set wwan0mbim0 autoconnect no`) before testing by hand.
+
+`mmcli --reset` does not bring the lock back and can leave the MBIM port timing
+out; reboot to retest. Whether the FM350-GL (`14c3:4d75`) behaves the same on a
+Lenovo is untested.
 
 ## Rolling serial AT port
 

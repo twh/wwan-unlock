@@ -27,7 +27,7 @@ and falls back to this implementation otherwise.
 | Foxconn T99W696 (SDX61) | `17cb:0308` | `foxunlock` | `setFccUnlock_fxn` → `libfiisdk` |
 | Rolling RW101R-GL | `33f8:0301/01a4/01a8/01a9/0302` | `at-gtfcclock` | `fccunlock_rw101` → `libmodemauthRW101` |
 | Fibocom FM350-GL | `14c3:4d75` | `at-gtfcclock` | `fccunlock_fm350_l860` → `libmodemauth` |
-| Intel L860R+ | `8086:7560` | `at-gtfcclock` on Lenovo, `intel-fcc-mbim` on Dell | `fccunlock_fm350_l860` → `libmodemauth`; Dell `ModemAuthenticator.exe` |
+| Intel L860R+ | `8086:7560` | `intel-fcc-mbim` then `at-gtfcclock` on Lenovo, `intel-fcc-mbim` on Dell | `fccunlock_fm350_l860` → `libmodemauth`; Dell `ModemAuthenticator.exe` |
 | Quectel EM160R-GL | `1eac:100d` | `mbimcli` | `setFccUnlock_cs24` → `libmbimtools` |
 | Quectel RM520N-GL | `1eac:1007` | `mbimcli` | `setFccUnlock_cs24` → `libmbimtools` |
 | Quectel EM061K | `2c7c:6008` | `mbimcli` | `setFccUnlock_cs24` → `libmbimtools` |
@@ -147,7 +147,9 @@ during an unlock. Four mechanisms cover the modules here:
 - **`at-gtfcclock`** — Rolling RW101R-GL, Fibocom FM350-GL, and the L860R+ on a
   Lenovo machine. The `at+gtfcclockgen` / `at+gtfcclockver` challenge/response,
   computed in the dispatcher with stock `sha256sum`.
-- **`intel-fcc-mbim`** — the L860R+ on a Dell machine. CID 1 of the Intel Mutual
+- **`intel-fcc-mbim`** — the L860R+ on a Dell machine, and on a Lenovo one after
+  `at-gtfcclock`, keyed with Lenovo's id hash: the AT unlock alone leaves
+  ModemManager's MBIM radio-on answering `Busy`. CID 1 of the Intel Mutual
   Authentication service over `mbimcli`: query, a set that asks for the challenge,
   then a set carrying the response.
 - **`mbimcli`** — every Quectel. `mbimcli --quectel-set-radio-state=on`, which is
