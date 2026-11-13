@@ -1,0 +1,120 @@
+From da3e75033084a438832923d571e25ccea7fa9be3 Mon Sep 17 00:00:00 2001
+From: Lochlyn Hansen <lochness@LH-Think.statick.io>
+Date: Fri, 13 Nov 2026 14:11:20 -0600
+Subject: [PATCH] broadband-modem-mbim: don't re-request automatic registration
+
+The Intel XMM7560 (L860R+, firmware 18601.5001.00.01.01.32_GC) never
+answers an MBIM register state set sent during its initial network search
+after radio power on. It registers on its own and reports it through
+register state indications, but the set itself stays pending until the 60s
+command timeout. That fails the registration, MM resets the registration
+state to idle and retries, and every connect after radio power on is
+delayed by a minute.
+
+The modem already reports its register mode in every register state
+response and indication, which MM parsed and dropped. Keep it, and when
+automatic registration with no data class change is requested of a modem
+that already reports automatic mode, skip the set: the generic
+registration checks then wait for the modem to report it is registered.
+
+Measured on a ThinkPad X13 Gen 3 from modem reset to connected: 115s
+before, 53s after, with registration completing 3.3s after the register
+step starts instead of failing at 60s.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/mm-broadband-modem-mbim.c | 29 +++++++++++++++++++++++++----
+ 1 file changed, 25 insertions(+), 4 deletions(-)
+
+diff --git a/src/mm-broadband-modem-mbim.c b/src/mm-broadband-modem-mbim.c
+index 3df4390..d310cbd 100644
+--- a/src/mm-broadband-modem-mbim.c
++++ b/src/mm-broadband-modem-mbim.c
+@@ -166,6 +166,7 @@ struct _MMBroadbandModemMbimPrivate {
+     gulong         enabling_signal_id;
+     gchar         *requested_operator_id;
+     MbimDataClass  requested_data_class; /* 0 for defaults/auto */
++    MbimRegisterMode reported_register_mode; /* as last reported by the modem */
+ 
+     /* Allowed modes helpers */
+     GTask *pending_allowed_modes_action;
+@@ -5215,6 +5216,7 @@ common_process_register_state (MMBroadbandModemMbim  *self,
+ {
+     MbimNwError        nw_error = 0;
+     MbimRegisterState  register_state = MBIM_REGISTER_STATE_UNKNOWN;
++    MbimRegisterMode   register_mode = MBIM_REGISTER_MODE_UNKNOWN;
+     MbimDataClass      available_data_classes = 0;
+     g_autofree gchar  *provider_id = NULL;
+     g_autofree gchar  *provider_name = NULL;
+@@ -5233,7 +5235,7 @@ common_process_register_state (MMBroadbandModemMbim  *self,
+                     message,
+                     &nw_error,
+                     &register_state,
+-                    NULL, /* register_mode */
++                    &register_mode,
+                     &available_data_classes,
+                     NULL, /* current_cellular_class */
+                     &provider_id,
+@@ -5251,7 +5253,7 @@ common_process_register_state (MMBroadbandModemMbim  *self,
+                     message,
+                     &nw_error,
+                     &register_state,
+-                    NULL, /* register_mode */
++                    &register_mode,
+                     &available_data_classes,
+                     NULL, /* current_cellular_class */
+                     &provider_id,
+@@ -5271,7 +5273,7 @@ common_process_register_state (MMBroadbandModemMbim  *self,
+                     message,
+                     &nw_error,
+                     &register_state,
+-                    NULL, /* register_mode */
++                    &register_mode,
+                     &available_data_classes,
+                     NULL, /* current_cellular_class */
+                     &provider_id,
+@@ -5288,7 +5290,7 @@ common_process_register_state (MMBroadbandModemMbim  *self,
+                     message,
+                     &nw_error,
+                     &register_state,
+-                    NULL, /* register_mode */
++                    &register_mode,
+                     &available_data_classes,
+                     NULL, /* current_cellular_class */
+                     &provider_id,
+@@ -5303,6 +5305,8 @@ common_process_register_state (MMBroadbandModemMbim  *self,
+         }
+     }
+ 
++    self->priv->reported_register_mode = register_mode;
++
+     /* Normalize preferred and available data classes to include any custom data class */
+     preferred_data_classes = mm_modem_mbim_normalize_data_class_mask (preferred_data_classes,
+                                                                       self->priv->caps_custom_data_class);
+@@ -7276,6 +7280,23 @@ modem_3gpp_register_in_network (MMIfaceModem3gpp *_self,
+     if (operator_id && operator_id[0])
+         self->priv->requested_operator_id = g_strdup (operator_id);
+ 
++    /* Some modems never answer a register state set while they are still in
++     * their initial network search after radio power on: the Intel XMM7560
++     * (L860R+, firmware 18601.5001.00.01.01.32_GC) registers on its own and
++     * reports it through indications, but the set itself is left pending until
++     * the 60s command timeout, which then fails the registration. Asking an
++     * automatic modem to go automatic, with no data class change, has nothing
++     * to do anyway, so skip it and let the generic registration checks wait for
++     * the modem to report registration. */
++    if (!self->priv->requested_operator_id &&
++        !self->priv->requested_data_class &&
++        self->priv->reported_register_mode == MBIM_REGISTER_MODE_AUTOMATIC) {
++        mm_obj_dbg (self, "modem already in automatic registration mode, not requesting it again");
++        g_task_return_boolean (task, TRUE);
++        g_object_unref (task);
++        return;
++    }
++
+     message = (mbim_message_register_state_set_new (
+                    self->priv->requested_operator_id ? self->priv->requested_operator_id : "",
+                    self->priv->requested_operator_id ? MBIM_REGISTER_ACTION_MANUAL : MBIM_REGISTER_ACTION_AUTOMATIC,
+-- 
+2.47.3
+
