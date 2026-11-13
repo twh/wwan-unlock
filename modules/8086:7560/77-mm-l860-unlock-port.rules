@@ -1,0 +1,17 @@
+# Keep ModemManager off the L860R+ AT port that the FCC unlock uses.
+#
+# A wwan character device has one receive queue shared by every process that
+# opens it, so each reply goes to whoever reads first. ModemManager opens both
+# iosm AT ports, and while it holds wwan*at0 it reads the at+gtfcclockgen
+# challenge before the dispatcher can, which leaves the unlock looping on
+# "no challenge" and the radio stuck OFF. At boot it only worked when the
+# dispatcher won that race; after a modem reset it reliably lost.
+#
+# ModemManager does not need this port: it drives the modem over MBIM and keeps
+# wwan*at1 as its secondary AT port. The dispatcher finds wwan*at0 from sysfs
+# when ModemManager no longer passes it.
+ACTION=="remove", GOTO="wwan_unlock_l860_end"
+SUBSYSTEM!="wwan", GOTO="wwan_unlock_l860_end"
+KERNEL!="wwan*at0", GOTO="wwan_unlock_l860_end"
+ATTRS{vendor}=="0x8086", ATTRS{device}=="0x7560", ENV{ID_MM_PORT_IGNORE}="1"
+LABEL="wwan_unlock_l860_end"

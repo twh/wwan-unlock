@@ -65,6 +65,14 @@ for P in "$@"; do
     AT|*at[0-9]*) [ -n "$AT" ] || AT="$P" ;;
   esac
 done
+# 77-mm-l860-unlock-port.rules keeps ModemManager off wwan*at0, so that it
+# cannot read the challenge before this script does, and ModemManager does not
+# pass a port it ignores. Pick that port up from the MBIM port's wwan device.
+if [ -n "$MBIM" ]; then
+  for P in "$(readlink -f "/sys/class/wwan/$MBIM")"/../wwan*at0; do
+    [ -e "$P" ] && AT="$(basename "$P")"
+  done
+fi
 [ -n "$AT" ] || [ -n "$MBIM" ] || { log "no usable control port"; exit 2; }
 DEVICE="/dev/$AT"
 
@@ -74,10 +82,29 @@ DEVICE="/dev/$AT"
 # it is present, which it is on any coreutils system.
 if command -v timeout >/dev/null 2>&1; then AT_TO='timeout 2'; else AT_TO=''; fi
 
+# The wwan AT port keeps whatever the modem sends while it is open, and a reply
+# that lands after the read below gave up stays queued for the next command.
+# Right after the MBIM unlock gtfcclockgen can take longer than the timeout, and
+# from then on every exchange read the previous command's answer: the challenge
+# came back to a later command and gtfcclockgen itself only ever saw OK, so the
+# dispatcher looped on "no challenge" until reboot. So drain the port before
+# each command, and read up to the final result code instead of a fixed number
+# of lines, returning the first information line, or the result code if none.
 at_command() {
     exec 9<>"$DEVICE"
+    [ -n "$AT_TO" ] && timeout 0.2 cat <&9 >/dev/null 2>&1
     printf "%s\r" "$1" >&9
-    answer="$($AT_TO sh -c 'read a <&9; read a <&9; printf "%s" "$a"' 2>/dev/null)"
+    answer="$($AT_TO sh -c '
+        r=""
+        while read -r l <&9; do
+            l="$(printf "%s" "$l" | tr -d "\r")"
+            case "$l" in
+                "") ;;
+                OK|ERROR|"+CME ERROR"*) [ -n "$r" ] || r="$l"; break ;;
+                *) [ -n "$r" ] || r="$l" ;;
+            esac
+        done
+        printf "%s" "$r"' 2>/dev/null)"
     exec 9>&-
     printf '%s' "$answer"
 }

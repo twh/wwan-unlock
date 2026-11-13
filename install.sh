@@ -215,6 +215,42 @@ remove_lenovo_runtime() {
     fi
 }
 
+# Per module extras, installed when the module ships them:
+#   77-mm-*.rules  udev rules that steer ModemManager's port use
+#   system-sleep   a systemd-sleep hook, for modems that do not survive suspend
+SLEEPDIR="/usr/lib/systemd/system-sleep"
+sleep_hook_name() { echo "wwan-unlock-$(echo "$1" | tr ':' '-')"; }
+
+install_module_extras() {
+    _id="$1"; _mdir="$2"
+    for _rule in "$_mdir"/77-mm-*.rules; do
+        [ -f "$_rule" ] || continue
+        install -m0644 "$_rule" "/etc/udev/rules.d/$(basename "$_rule")"
+        info "installed /etc/udev/rules.d/$(basename "$_rule")"
+        udevadm control --reload >/dev/null 2>&1 || true
+        udevadm trigger --subsystem-match=wwan --action=change >/dev/null 2>&1 || true
+    done
+    if [ -f "$_mdir/system-sleep" ]; then
+        mkdir -p "$SLEEPDIR"
+        install -m0755 "$_mdir/system-sleep" "$SLEEPDIR/$(sleep_hook_name "$_id")"
+        info "installed $SLEEPDIR/$(sleep_hook_name "$_id")"
+    fi
+}
+
+remove_module_extras() {
+    _id="$1"; _mdir="$2"
+    for _rule in "$_mdir"/77-mm-*.rules; do
+        [ -f "/etc/udev/rules.d/$(basename "$_rule")" ] || continue
+        rm -f "/etc/udev/rules.d/$(basename "$_rule")"
+        info "removed /etc/udev/rules.d/$(basename "$_rule")"
+        udevadm control --reload >/dev/null 2>&1 || true
+    done
+    if [ -f "$SLEEPDIR/$(sleep_hook_name "$_id")" ]; then
+        rm -f "$SLEEPDIR/$(sleep_hook_name "$_id")"
+        info "removed $SLEEPDIR/$(sleep_hook_name "$_id")"
+    fi
+}
+
 # ---- actions ---------------------------------------------------------------
 do_uninstall() {
     need_root
@@ -222,6 +258,7 @@ do_uninstall() {
     for m in "$MODDIR"/*/; do
         [ -f "$m/module.conf" ] || continue
         _mids=$( . "$m/module.conf"; echo "$MODULE_IDS" )
+        remove_module_extras "$(basename "$m")" "$m"
         for _id in $(basename "$m") $_mids; do
             if [ -e "$FCCDIR/$_id" ] || [ -L "$FCCDIR/$_id" ]; then
                 rm -f "$FCCDIR/$_id"; info "removed $FCCDIR/$_id"
@@ -300,6 +337,8 @@ install_module() {
         install -m0755 "$_dir/$MODULE_DISPATCHER" "$FCCDIR/$_one"
         info "installed $FCCDIR/$_one"
     done
+
+    install_module_extras "$_id" "$_dir"
 
     info "restarting ModemManager (full port re-probe, ~30s; not a hang)..."
     systemctl restart ModemManager

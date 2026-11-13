@@ -1,0 +1,58 @@
+#!/bin/sh
+# systemd-sleep hook for the Intel L860R+ (8086:7560, iosm).
+#
+# The modem does not survive s2idle under iosm. After resume ModemManager
+# re-probes it and it enables, registers and attaches, but MBIM_CID_CONNECT is
+# never answered, so the bearer sits in "connecting" until NetworkManager gives
+# up, and every further suspend makes it worse (AT port timeouts, "Couldn't
+# peek MBIM port"). Before the first suspend of a boot the same connect
+# completes in about ten seconds. Only a reboot or a modem reset brings it back.
+#
+# So on resume, take iosm off the modem, reset the function and bind it again.
+# The ACPI reset method power-cycles the card, which comes back FCC locked, and
+# ModemManager runs the unlock dispatcher on it as it does at boot.
+#
+# iosm must stay bound through the sleep itself. Unbinding it before suspend
+# was tried and bricks the card until reboot: with no driver holding it, s2idle
+# powers the slot down, the link never trains again, the device drops off the
+# bus, and neither a rescan, a root port D3cold cycle nor the thinkpad_acpi
+# wwan rfkill switch brings it back. Bound, it stays on the bus and the reset
+# below recovers it.
+#
+# Installed as /usr/lib/systemd/system-sleep/wwan-unlock-8086-7560.
+# systemd-sleep calls it with  pre|post  suspend|hibernate|hybrid-sleep|...;
+# only post does anything.
+TAG=wwan-unlock-sleep
+log() { logger -t "$TAG" -- "$@"; }
+
+DRV=/sys/bus/pci/drivers/iosm
+
+modems() {
+    for D in /sys/bus/pci/devices/*; do
+        [ "$(cat "$D/vendor" 2>/dev/null)" = 0x8086 ] || continue
+        [ "$(cat "$D/device" 2>/dev/null)" = 0x7560 ] || continue
+        basename "$D"
+    done
+}
+
+case "$1" in
+    post)
+        for BDF in $(modems); do
+            DEV="/sys/bus/pci/devices/$BDF"
+            # take the driver off so the reset does not pull the device out
+            # from under it
+            [ -e "$DRV/$BDF" ] && echo "$BDF" > "$DRV/unbind" 2>/dev/null
+            if echo 1 > "$DEV/reset" 2>/dev/null; then
+                log "$BDF: reset after $2 ($(cat "$DEV/reset_method" 2>/dev/null))"
+            else
+                log "$BDF: reset failed after $2, rebinding anyway"
+            fi
+            if echo "$BDF" > "$DRV/bind" 2>/dev/null; then
+                log "$BDF: reattached iosm"
+            else
+                log "$BDF: could not reattach iosm"
+            fi
+        done
+        ;;
+esac
+exit 0
