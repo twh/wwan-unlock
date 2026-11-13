@@ -8,7 +8,8 @@
 # drivers/net/wwan/iosm on vendor and product alone, so one dispatcher serves
 # every one. Each OEM unlocks it its own way:
 #
-#   Lenovo  1cf8:*                AT +GTFCCLOCK, below
+#   Lenovo  1cf8:*                the Intel FCC lock over MBIM keyed with the
+#                                 Lenovo hash, then AT +GTFCCLOCK, below
 #   Dell    1028:5823, 1028:3a17  Intel FCC lock over MBIM, below
 #   HP      103c:8507/893b/8a53   ships no unlock at all
 #
@@ -182,8 +183,9 @@ swap32() {
 # mbimcli prints and parses those u32 fields as numbers while the modem hashes
 # their little endian bytes, so the swap is applied at that boundary only. The
 # response must be decimal: mbimcli_read_uint_from_string rejects non-digits.
-unlock_dell() {
-    [ -n "$MBIM" ] || { log "  no MBIM port for the Dell method"; return 1; }
+unlock_mbim() {
+    KEY="$1"
+    [ -n "$MBIM" ] || { log "  no MBIM port for the MBIM method"; return 1; }
     DEV="/dev/$MBIM"
     mbim() { mbimcli --device-open-proxy --device="$DEV" "$1" 2>&1; }
     challenge_of() { echo "$1" | sed -n 's/.*Challenge: *\([0-9][0-9]*\).*/\1/p'; }
@@ -209,13 +211,13 @@ unlock_dell() {
             log "  attempt $n: modem returned no challenge"
             sleep 0.5; n="$((n + 1))"; continue
         fi
-        COMBINED="$(swap32 "$(printf '%08x' "$CHALLENGE")")bb23be7f"
+        COMBINED="$(swap32 "$(printf '%08x' "$CHALLENGE")")$KEY"
         HASH="$(hex_to_bin "$COMBINED" | sha256sum | cut -d ' ' -f 1)"
         RESPONSE="$(printf '%u' "0x$(swap32 "$(printf '%.8s' "$HASH")")")"
         RESULT="$(mbim "--intel-set-fcc-lock=1,$RESPONSE")"
         case "$RESULT" in
             *'FCC lock status: unlocked'*)
-                log "  FCC unlock: SUCCESS (Dell method)"
+                log "  FCC unlock: SUCCESS (MBIM method, hash $KEY)"
                 return 0 ;;
             *) log "  attempt $n: response refused: $RESULT" ;;
         esac
@@ -267,6 +269,42 @@ case "$(echo "$SYS_VENDOR" | tr '[:upper:]' '[:lower:]')" in
     *dell*)   METHODS='dell' ;;
     *)        METHODS='lenovo dell' ;;
 esac
+
+# The MBIM side of the lock is keyed per OEM: Dell's card name, or the
+# machine's own model id hash everywhere else.
+unlock_dell() { unlock_mbim bb23be7f; }
+
+# On a Lenovo the AT unlock alone is not enough for ModemManager. Observed on
+# an X13 Gen 3 (firmware 18601.5001.00.01.01.32_GC): gtfcclockver replies 1 and
+# gtfcclockstate reads 1, yet MBIM_CID_RADIO_STATE set on still answers Busy
+# and the Intel FCC lock query still reports locked with state 0. Lenovo's own
+# sequence gets away with this because it powers the radio with at+cfun=1,
+# which this dispatcher leaves to ModemManager, and ModemManager does it over
+# MBIM. The Intel MBIM unlock keyed with the Lenovo vendor id hash clears that
+# gate, after which the MBIM radio set succeeds. So run both, and let the MBIM
+# result decide.
+#
+# Order matters: MBIM first, then AT. The AT-then-MBIM order was seen to wedge
+# the modem: after gtfcclockver replied 1, the next AT commands timed out, the
+# MBIM exchange still reported unlocked, and ModemManager's radio set then
+# timed out and the firmware crashed (iosm "PORT open refused, phase
+# A-CD_READY") until the next reboot. With MBIM first and AT second the modem
+# registers. MBIM alone is not enough either: ModemManager then reports the
+# software radio switch OFF until the AT unlock has run. The AT challenge can
+# go unanswered for a few seconds after the MBIM unlock; ModemManager re-runs
+# this dispatcher, and a later run completes it.
+unlock_lenovo_both() {
+    MBIM_OK=1
+    for H in $VENDOR_ID_HASHES; do
+        [ "$H" = 'bb23be7f' ] && continue
+        unlock_mbim "$H" && { MBIM_OK=0; break; }
+    done
+    [ "$MBIM_OK" = 0 ] || log "  MBIM method did not unlock, trying AT anyway"
+    unlock_lenovo || log "  AT method did not unlock"
+    return "$MBIM_OK"
+}
+[ "$METHODS" = 'lenovo' ] && METHODS='lenovo_both'
+[ "$METHODS" = 'lenovo dell' ] && METHODS='lenovo_both dell'
 
 log "invoked: AT=${AT:-none} MBIM=${MBIM:-none} vendor=${SYS_VENDOR:-unknown} methods='$METHODS'"
 for METHOD in $METHODS; do

@@ -19,12 +19,20 @@ in the tree, **only for SAR**. No unlock uses either.
 |---|---|---|
 | `foxunlock` | Foxconn T99W696 | our own QMI-over-MBIM sender |
 | `at-gtfcclock` | Rolling RW101R-GL, Fibocom FM350-GL, Intel L860R+ on Lenovo machines | the dispatcher, with `sha256sum` |
-| `intel-fcc-mbim` | Intel L860R+ on Dell machines | stock `mbimcli`, Intel Mutual Authentication service, CID 1 |
+| `intel-fcc-mbim` | Intel L860R+ on Dell machines, and on Lenovo machines before `at-gtfcclock` | stock `mbimcli`, Intel Mutual Authentication service, CID 1 |
 | `mbimcli` | Quectel EM160R-GL, EM061K, RM520N-GL, EM05-G, EM05-CN | stock `mbimcli`, Quectel radio state |
 
 The L860R+ needs two of those in one dispatcher, because three OEMs ship that
 module and Lenovo's AT sequence is right for only one of them. The DMI system
 vendor picks the method, which is what Lenovo's own library does.
+
+On a Lenovo the dispatcher runs both. Lenovo's own sequence ends in
+`at+cfun=1`, which powers the radio over AT; the dispatcher leaves the radio to
+ModemManager, which powers it over MBIM, and the MBIM side keeps its own lock
+that the AT unlock does not clear. The Intel MBIM exchange keyed with Lenovo's
+`3df8c719` clears it, and it runs first because the reverse order crashed the
+modem. Observed on hardware, not read from a vendor binary; see
+[HARDWARE-STATUS.md](HARDWARE-STATUS.md#l860r-on-a-lenovo-the-mbim-side-lock).
 
 ## `foxunlock` — Foxconn T99W696, `17cb:0308`
 
