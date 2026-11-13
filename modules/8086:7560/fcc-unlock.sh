@@ -76,6 +76,22 @@ fi
 [ -n "$AT" ] || [ -n "$MBIM" ] || { log "no usable control port"; exit 2; }
 DEVICE="/dev/$AT"
 
+# Earlier versions of at_command opened the port with <>, which creates a
+# regular file when the path is missing. A run still going when the ports went
+# away for a resume reset left /dev/wwan0at0 as a file, the kernel could not
+# create its device node over it, and every later unlock wrote to that file and
+# read its own commands back. If such a file is in the way, put the real node
+# back from the numbers the kernel publishes for the port.
+if [ -n "$AT" ] && [ -e "$DEVICE" ] && [ ! -c "$DEVICE" ] \
+   && [ -r "/sys/class/wwan/$AT/dev" ]; then
+  NODE="$(cat "/sys/class/wwan/$AT/dev")"
+  if rm -f "$DEVICE" && mknod -m 600 "$DEVICE" c "${NODE%%:*}" "${NODE##*:}"; then
+    log "  replaced a regular file at $DEVICE with its device node $NODE"
+  else
+    log "  $DEVICE is not a device node and could not be replaced"
+  fi
+fi
+
 # A modem that never answers would otherwise hang this script until
 # ModemManager kills it at five seconds, and the Dell method below would never
 # get to run. POSIX sh has no "read -t", so bound the read with timeout(1) when
@@ -90,8 +106,22 @@ if command -v timeout >/dev/null 2>&1; then AT_TO='timeout 2'; else AT_TO=''; fi
 # dispatcher looped on "no challenge" until reboot. So drain the port before
 # each command, and read up to the final result code instead of a fixed number
 # of lines, returning the first information line, or the result code if none.
+#
+# The port disappears whenever the modem resets, and ModemManager can still be
+# running this script at that moment, for instance across a suspend. Opening
+# with <> would then create a regular file at the port's path, which keeps the
+# kernel from creating the device node when the port comes back. So only open
+# a device node, and if the node vanished between the check and the open,
+# remove the file the open just created.
 at_command() {
+    [ -c "$DEVICE" ] || { log "  $DEVICE is not a device node, skipping $1"; return 0; }
     exec 9<>"$DEVICE"
+    if [ ! -c /proc/self/fd/9 ]; then
+        exec 9>&-
+        [ -f "$DEVICE" ] && rm -f "$DEVICE"
+        log "  $DEVICE went away while opening it, skipping $1"
+        return 0
+    fi
     [ -n "$AT_TO" ] && timeout 0.2 cat <&9 >/dev/null 2>&1
     printf "%s\r" "$1" >&9
     answer="$($AT_TO sh -c '
